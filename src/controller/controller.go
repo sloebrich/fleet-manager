@@ -66,6 +66,10 @@ func (c *Controller) heartbeat(
 		c.vehicles[req.VehicleID] = vehicle
 	}
 
+	if vehicle.Status == domain.VehicleOffline {
+		vehicle.Status = domain.VehicleIdle
+	}
+
 	if req.Sequence > vehicle.LastSequence {
 		vehicle.Position = domain.Position{X: req.Position.X, Y: req.Position.Y}
 		vehicle.LastSequence = req.Sequence
@@ -106,6 +110,12 @@ func (c *Controller) checkVehicles() {
 
 		if now.Sub(vehicle.LastHeartbeat) > heartbeatTimeout {
 			vehicle.Status = domain.VehicleOffline
+
+			assignedTask, ok := c.tasks[vehicle.CurrentTask]
+			if ok {
+				assignedTask.AssignedVehicle = ""
+				assignedTask.Status = domain.TaskQueued
+			}
 
 			log.Printf(
 				"vehicle offline: %s",

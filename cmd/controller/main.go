@@ -22,11 +22,11 @@ func main() {
 	http.HandleFunc("/api/state", controller.HandleState)
 
 	go func() {
+		log.Println("HTTP server listening on :8080")
+
 		if err := http.ListenAndServe(":8080", nil); err != nil {
 			log.Fatal(err)
 		}
-
-		log.Println("HTTP server listening on :8080")
 	}()
 
 	err = client.Subscribe(fmt.Sprintf("%s/+", domain.TopicHeartbeat), controller.HandleHeartbeat)
