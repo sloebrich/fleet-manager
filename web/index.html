@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet Manager</title>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #121212;
+            color: #e0e0e0;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        canvas {
+            background: #181818;
+            border: 1px solid #333;
+            border-radius: 6px;
+            margin-top: 20px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .card {
+            background: #1e1e1e;
+            border: 1px solid #2d2d2d;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+            text-align: left;
+            font-family: monospace;
+        }
+
+        .status-online {
+            color: #00ff66;
+            font-weight: bold;
+        }
+
+        .status-offline {
+            color: #ff3333;
+            font-weight: bold;
+        }
+
+        .task-completed {
+            color: #00ff66;
+        }
+
+        .task-working {
+            color: #ffaa00;
+        }
+
+        .task-queued {
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Fleet Manager</h1>
+
+    <div class="card" id="fleet-status">
+        Connecting to Controller...
+    </div>
+
+    <canvas id="factory-floor" width="600" height="600"></canvas>
+
+</div>
+
+<script>
+    const canvas = document.getElementById("factory-floor");
+    const ctx = canvas.getContext("2d");
+    const statusDiv = document.getElementById("fleet-status");
+
+    const scale = 5;
+    const originX = canvas.width / 2;
+    const originY = canvas.height / 2;
+
+    // Stable colour for each vehicle.
+    const vehicleHues = {};
+    let vehicleColorIndex = 0;
+
+    function hueForVehicle(id) {
+        if (!(id in vehicleHues)) {
+            vehicleHues[id] = (vehicleColorIndex * 137) % 360;
+            vehicleColorIndex++;
+        }
+
+        return vehicleHues[id];
+    }
+
+    function colorForVehicle(id, alpha = 1) {
+        return `hsla(${hueForVehicle(id)}, 90%, 60%, ${alpha})`;
+    }
+
+    function drawGrid() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Grid
+        ctx.strokeStyle = "#262626";
+        ctx.lineWidth = 1;
+
+        for (let g = -50; g <= 50; g += 10) {
+            const sx = originX + g * scale;
+            const sy = originY + g * scale;
+
+            ctx.beginPath();
+            ctx.moveTo(sx, 0);
+            ctx.lineTo(sx, canvas.height);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(0, sy);
+            ctx.lineTo(canvas.width, sy);
+            ctx.stroke();
+        }
+
+        // Axes
+        ctx.strokeStyle = "#444";
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        ctx.moveTo(originX, 0);
+        ctx.lineTo(originX, canvas.height);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(0, originY);
+        ctx.lineTo(canvas.width, originY);
+        ctx.stroke();
+    }
+
+    function drawTaskLine(vehicle, task) {
+        const screenX = originX + vehicle.position.x * scale;
+        const screenY = originY - vehicle.position.y * scale;
+
+        const targetX = originX + task.destination.x * scale;
+        const targetY = originY - task.destination.y * scale;
+
+        const color = colorForVehicle(vehicle.id);
+
+        // Line from vehicle to destination
+        ctx.beginPath();
+        ctx.strokeStyle = colorForVehicle(vehicle.id, 0.3);
+        ctx.lineWidth = 2;
+        ctx.moveTo(screenX, screenY);
+        ctx.lineTo(targetX, targetY);
+        ctx.stroke();
+
+        // Destination marker
+        const size = 8;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.moveTo(targetX - size, targetY - size);
+        ctx.lineTo(targetX + size, targetY + size);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(targetX + size, targetY - size);
+        ctx.lineTo(targetX - size, targetY + size);
+        ctx.stroke();
+    }
+
+    function drawVehicle(vehicle) {
+        const screenX = originX + vehicle.position.x * scale;
+        const screenY = originY - vehicle.position.y * scale;
+
+        const color = colorForVehicle(vehicle.id);
+
+        // Vehicle
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 14, 0, 2 * Math.PI);
+
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // ID
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px monospace";
+        ctx.fillText(
+            vehicle.id,
+            screenX - 20,
+            screenY - 22
+        );
+    }
+
+    function taskForVehicle(vehicle, tasks) {
+        if (!vehicle.currentTask) {
+            return null;
+        }
+
+        return tasks[vehicle.currentTask] || null;
+    }
+
+    async function fetchFleetState() {
+        try {
+            const response = await fetch(
+                "http://localhost:8080/api/state"
+            );
+
+            if (!response.ok) {
+                throw new Error("Controller returned " + response.status);
+            }
+
+            const state = await response.json();
+
+            drawGrid();
+
+            const vehicles = state.vehicles || {};
+            const tasks = state.tasks || {};
+
+            const vehicleList = Object.values(vehicles);
+            const taskList = Object.values(tasks);
+
+            let html = "";
+
+            if (vehicleList.length === 0) {
+                html = "No vehicles connected.";
+            }
+
+            // Draw task routes first so vehicles appear on top.
+            vehicleList.forEach(vehicle => {
+                const task = taskForVehicle(vehicle, tasks);
+
+                if (task && task.status === "IN_PROGRESS") {
+                    drawTaskLine(vehicle, task);
+                }
+            });
+
+            vehicleList.forEach(vehicle => {
+                drawVehicle(vehicle);
+
+                const statusClass =
+                    vehicle.status === "OFFLINE"
+                        ? "status-offline"
+                        : "status-online";
+
+                let taskText = "idle";
+
+                const task = taskForVehicle(vehicle, tasks);
+
+                if (task) {
+                    taskText =
+                        `${task.id} → (${task.destination.x}, ${task.destination.y})`;
+                }
+
+                html += `
+                    • <strong>[${vehicle.id}]</strong>
+                    pos: (${vehicle.position.x}, ${vehicle.position.y})
+                    &nbsp;
+                    <span class="${statusClass}">
+                        ${vehicle.status}
+                    </span>
+                    &nbsp;
+                    ${taskText}
+                    <br>
+                `;
+            });
+
+            html += "<br><strong>Tasks</strong><br>";
+
+            if (taskList.length === 0) {
+                html += "No tasks.";
+            } else {
+                taskList.forEach(task => {
+                    let taskClass = "task-queued";
+
+                    if (task.status === "IN_PROGRESS") {
+                        taskClass = "task-working";
+                    } else if (task.status === "COMPLETED") {
+                        taskClass = "task-completed";
+                    }
+
+                    html += `
+                        • <strong>[${task.id}]</strong>
+                        → (${task.destination.x}, ${task.destination.y})
+                        &nbsp;
+                        <span class="${taskClass}">
+                            ${task.status}
+                        </span>
+                        ${task.assigned_vehicle
+                            ? ` → ${task.assigned_vehicle}`
+                            : ""}
+                        <br>
+                    `;
+                });
+            }
+
+            statusDiv.innerHTML = html;
+
+        } catch (err) {
+            statusDiv.innerHTML =
+                `<span class="status-offline">
+                    LOST CONNECTION TO CONTROLLER
+                </span>`;
+        }
+    }
+
+    // Visualization only.
+    // The Controller remains authoritative.
+    setInterval(fetchFleetState, 200);
+
+    fetchFleetState();
+</script>
+
+</body>
+</html>
