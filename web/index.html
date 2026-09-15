@@ -61,6 +61,28 @@
         .task-queued {
             color: #aaa;
         }
+
+        .section-header {
+            display: block;
+            margin: 4px 0 6px;
+        }
+
+        table.fleet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: monospace;
+        }
+
+        table.fleet-table td {
+            padding: 2px 14px 2px 0;
+            white-space: nowrap;
+            vertical-align: top;
+        }
+
+        table.fleet-table td.grow {
+            width: 100%;
+            white-space: normal;
+        }
     </style>
 </head>
 
@@ -210,6 +232,46 @@
         return tasks[vehicle.currentTask] || null;
     }
 
+    function renderVehicleRow(vehicle, tasks) {
+        const statusClass =
+            vehicle.status === "OFFLINE" ? "status-offline" : "status-online";
+
+        const task = taskForVehicle(vehicle, tasks);
+        const taskText = task
+            ? `${task.id} &rarr; (${task.destination.x}, ${task.destination.y})`
+            : "idle";
+
+        return `
+            <tr>
+                <td>&bull; <strong>[${vehicle.id}]</strong></td>
+                <td>pos: (${vehicle.position.x}, ${vehicle.position.y})</td>
+                <td><span class="${statusClass}">${vehicle.status}</span></td>
+                <td class="grow">${taskText}</td>
+            </tr>
+        `;
+    }
+
+    function renderTaskRow(task) {
+        let taskClass = "task-queued";
+
+        if (task.status === "IN_PROGRESS") {
+            taskClass = "task-working";
+        } else if (task.status === "COMPLETED") {
+            taskClass = "task-completed";
+        }
+
+        return `
+            <tr>
+                <td>&bull; <strong>[${task.id}]</strong></td>
+                <td>&rarr; (${task.destination.x}, ${task.destination.y})</td>
+                <td><span class="${taskClass}">${task.status}</span></td>
+                <td class="grow">${
+                    task.assigned_vehicle ? `&rarr; ${task.assigned_vehicle}` : ""
+                }</td>
+            </tr>
+        `;
+    }
+
     async function fetchFleetState() {
         try {
             const response = await fetch(
@@ -230,12 +292,6 @@
             const vehicleList = Object.values(vehicles);
             const taskList = Object.values(tasks);
 
-            let html = "";
-
-            if (vehicleList.length === 0) {
-                html = "No vehicles connected.";
-            }
-
             // Draw task routes first so vehicles appear on top.
             vehicleList.forEach(vehicle => {
                 const task = taskForVehicle(vehicle, tasks);
@@ -245,63 +301,30 @@
                 }
             });
 
-            vehicleList.forEach(vehicle => {
-                drawVehicle(vehicle);
+            vehicleList.forEach(vehicle => drawVehicle(vehicle));
 
-                const statusClass =
-                    vehicle.status === "OFFLINE"
-                        ? "status-offline"
-                        : "status-online";
+            let html = "<strong class=\"section-header\">Vehicles</strong>";
 
-                let taskText = "idle";
+            if (vehicleList.length === 0) {
+                html += "No vehicles connected.";
+            } else {
+                html += "<table class=\"fleet-table\">";
+                vehicleList.forEach(vehicle => {
+                    html += renderVehicleRow(vehicle, tasks);
+                });
+                html += "</table>";
+            }
 
-                const task = taskForVehicle(vehicle, tasks);
-
-                if (task) {
-                    taskText =
-                        `${task.id} → (${task.destination.x}, ${task.destination.y})`;
-                }
-
-                html += `
-                    • <strong>[${vehicle.id}]</strong>
-                    pos: (${vehicle.position.x}, ${vehicle.position.y})
-                    &nbsp;
-                    <span class="${statusClass}">
-                        ${vehicle.status}
-                    </span>
-                    &nbsp;
-                    ${taskText}
-                    <br>
-                `;
-            });
-
-            html += "<br><strong>Tasks</strong><br>";
+            html += "<strong class=\"section-header\">Tasks</strong>";
 
             if (taskList.length === 0) {
                 html += "No tasks.";
             } else {
+                html += "<table class=\"fleet-table\">";
                 taskList.forEach(task => {
-                    let taskClass = "task-queued";
-
-                    if (task.status === "IN_PROGRESS") {
-                        taskClass = "task-working";
-                    } else if (task.status === "COMPLETED") {
-                        taskClass = "task-completed";
-                    }
-
-                    html += `
-                        • <strong>[${task.id}]</strong>
-                        → (${task.destination.x}, ${task.destination.y})
-                        &nbsp;
-                        <span class="${taskClass}">
-                            ${task.status}
-                        </span>
-                        ${task.assigned_vehicle
-                            ? ` → ${task.assigned_vehicle}`
-                            : ""}
-                        <br>
-                    `;
+                    html += renderTaskRow(task);
                 });
+                html += "</table>";
             }
 
             statusDiv.innerHTML = html;
