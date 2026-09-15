@@ -30,12 +30,12 @@ func main() {
 
 	v := vehicle.New(*vehicleId, &domain.Position{X: *startX, Y: *startY}, client)
 
-	err = client.Subscribe(fmt.Sprintf("%s/%s", domain.TopicTask, vehicleId), v.HandleTask)
+	err = client.Subscribe(fmt.Sprintf("%s/%s", domain.TopicTask, *vehicleId), v.HandleTask)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = client.Subscribe(fmt.Sprintf("%s/%s", domain.TopicStop, vehicleId), v.HandleStop)
+	err = client.Subscribe(fmt.Sprintf("%s/%s", domain.TopicStop, *vehicleId), v.HandleStop)
 	if err != nil {
 		log.Fatal(err)
 	}
