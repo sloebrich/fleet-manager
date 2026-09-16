@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"fleet-manager/src/domain"
+	"fleet-manager/src/fault"
 	mqtt "fleet-manager/src/mqtt"
 	"fleet-manager/src/vehicle"
 )
@@ -29,6 +31,11 @@ func main() {
 	defer client.Close()
 
 	v := vehicle.New(*vehicleId, &domain.Position{X: *startX, Y: *startY}, client)
+
+	v.AddFault(fault.Delay, 5, 2500*time.Millisecond)
+	v.AddFault(fault.Delay, 6, 1500*time.Millisecond)
+
+	v.AddFault(fault.Duplicate, 20, 0)
 
 	err = client.Subscribe(fmt.Sprintf("%s/%s", domain.TopicTask, *vehicleId), v.HandleTask)
 	if err != nil {

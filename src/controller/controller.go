@@ -44,14 +44,13 @@ func New(client *mqtt.Client) *Controller {
 	return controller
 }
 
-func (c *Controller) AddFault(action fault.Action, topic domain.Topic, vehicleID string, sequence int, delay time.Duration) {
+func (c *Controller) AddFault(action fault.Action, vehicleID string, sequence int, delay time.Duration) {
 	sequencePtr := &sequence
 	if sequence <= 0 {
 		sequencePtr = nil
 	}
 	c.faultInjector.AddRule(fault.Rule{
 		Action:    action,
-		Topic:     topic,
 		VehicleID: vehicleID,
 		Sequence:  sequencePtr,
 		Delay:     delay,
@@ -74,34 +73,8 @@ func (c *Controller) HandleHeartbeat(
 		return
 	}
 
-	if c.faultInjector.ShouldDrop(domain.TopicHeartbeat, heartbeat.VehicleID, heartbeat.Sequence) {
-		log.Printf(
-			"FAULT DROP heartbeat vehicle=%s sequence=%d",
-			heartbeat.VehicleID,
-			heartbeat.Sequence,
-		)
-		return
-	}
-	if delay := c.faultInjector.ShouldDelay(domain.TopicHeartbeat, heartbeat.VehicleID, heartbeat.Sequence); delay != nil {
-		log.Printf(
-			"FAULT DELAY heartbeat vehicle=%s sequence=%d",
-			heartbeat.VehicleID,
-			heartbeat.Sequence,
-		)
-		go func() {
-			time.Sleep(*delay)
-			c.heartbeat(heartbeat)
-		}()
-		return
-	}
-	if c.faultInjector.ShouldDuplicate(domain.TopicHeartbeat, heartbeat.VehicleID, heartbeat.Sequence) {
-		log.Printf(
-			"FAULT DUPLICATE heartbeat vehicle=%s sequence=%d",
-			heartbeat.VehicleID,
-			heartbeat.Sequence,
-		)
-		c.heartbeat(heartbeat)
-	}
+	log.Printf("received vehicle=%s, sequence=%d", heartbeat.VehicleID, heartbeat.Sequence)
+
 	c.heartbeat(heartbeat)
 }
 
@@ -141,6 +114,49 @@ func (c *Controller) heartbeat(
 	}
 
 	vehicle.LastHeartbeat = time.Now()
+}
+
+func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string, payload []byte) error {
+	if c.faultInjector.ShouldDrop(sequence, vehicleID) {
+		log.Printf(
+			"FAULT DROP heartbeat vehicle=%s sequence=%d",
+			vehicleID,
+			sequence,
+		)
+		return nil
+	}
+	if delay := c.faultInjector.ShouldDelay(sequence, vehicleID); delay != nil {
+		log.Printf(
+			"FAULT DELAY heartbeat vehicle=%s sequence=%d",
+			vehicleID,
+			sequence,
+		)
+		go func() {
+			time.Sleep(*delay)
+			err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
+			if err != nil {
+				log.Println("heartbeat failed:", err)
+			}
+		}()
+		return nil
+	}
+	if c.faultInjector.ShouldDuplicate(sequence, "") {
+		log.Printf(
+			"FAULT DUPLICATE heartbeat vehicle=%s sequence=%d",
+			vehicleID,
+			sequence,
+		)
+		err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
+		if err != nil {
+			log.Println("heartbeat failed:", err)
+		}
+
+	}
+	err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
+	if err != nil {
+		log.Println("heartbeat failed:", err)
+	}
+	return err
 }
 
 func (c *Controller) failureDetector() {
@@ -251,42 +267,11 @@ func (c *Controller) assignTask(task *domain.Task, vehicle *domain.VehicleState)
 		return err
 	}
 
-	if c.faultInjector.ShouldDrop(domain.TopicTask, vehicle.ID, sequence) {
-		log.Printf(
-			"FAULT DROP task vehicle=%s sequence=%d",
-			vehicle.ID,
-			sequence,
-		)
-		return nil
-	}
-	if delay := c.faultInjector.ShouldDelay(domain.TopicTask, vehicle.ID, sequence); delay != nil {
-		log.Printf(
-			"FAULT DELAY task vehicle=%s sequence=%d",
-			vehicle.ID,
-			sequence,
-		)
-		go func() {
-			time.Sleep(*delay)
-			c.client.Publish(fmt.Sprintf("%s/%s", domain.TopicTask, vehicle.ID), payload)
-		}()
-		return nil
-	}
-	if c.faultInjector.ShouldDuplicate(domain.TopicTask, vehicle.ID, sequence) {
-		log.Printf(
-			"FAULT DUPLICATE task vehicle=%s sequence=%d",
-			vehicle.ID,
-			sequence,
-		)
-		c.client.Publish(fmt.Sprintf("%s/%s", domain.TopicTask, vehicle.ID), payload)
-	}
-
-	if err = c.client.Publish(fmt.Sprintf("%s/%s", domain.TopicTask, vehicle.ID), payload); err != nil {
-		return err
-	}
+	err = c.publish(domain.TopicTask, sequence, vehicle.ID, payload)
 
 	log.Printf("assigned task=%s to vehicle=%s generation=%d", task.ID, vehicle.ID, task.AssignmentGeneration)
 
-	return nil
+	return err
 }
 
 func (c *Controller) stopVehicle(vehicleId string, reason string) error {
@@ -294,45 +279,18 @@ func (c *Controller) stopVehicle(vehicleId string, reason string) error {
 	defer c.mu.Unlock()
 
 	sequence := c.nextMessageSequence(vehicleId)
-	if c.faultInjector.ShouldDrop(domain.TopicStop, vehicleId, sequence) {
-		log.Printf(
-			"FAULT DROP stop vehicle=%s sequence=%d",
-			vehicleId,
-			sequence,
-		)
-		return nil
-	}
-	if delay := c.faultInjector.ShouldDelay(domain.TopicStop, vehicleId, sequence); delay != nil {
-		log.Printf(
-			"FAULT DELAY stop vehicle=%s sequence=%d",
-			vehicleId,
-			sequence,
-		)
-		go func() {
-			time.Sleep(*delay)
-			c.client.Publish(fmt.Sprintf("%s/%s", domain.TopicStop, vehicleId), domain.StopMessage{
-				Reason:   reason,
-				Sequence: sequence,
-			})
-		}()
-		return nil
-	}
-	if c.faultInjector.ShouldDuplicate(domain.TopicStop, vehicleId, sequence) {
-		log.Printf(
-			"FAULT DUPLICATE stop vehicle=%s sequence=%d",
-			vehicleId,
-			sequence,
-		)
-		c.client.Publish(fmt.Sprintf("%s/%s", domain.TopicStop, vehicleId), domain.StopMessage{
-			Reason:   reason,
-			Sequence: sequence,
-		})
-	}
-	if err := c.client.Publish(fmt.Sprintf("%s/%s", domain.TopicStop, vehicleId), domain.StopMessage{
+
+	message := domain.StopMessage{
 		Reason:   reason,
 		Sequence: sequence,
-	}); err != nil {
+	}
+
+	payload, err := json.Marshal(message)
+	if err != nil {
 		return err
 	}
-	return nil
+
+	err = c.publish(domain.TopicStop, sequence, vehicleId, payload)
+
+	return err
 }

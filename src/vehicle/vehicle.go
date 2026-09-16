@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"fleet-manager/src/domain"
+	"fleet-manager/src/fault"
 
 	mqtt "fleet-manager/src/mqtt"
 
@@ -25,13 +26,16 @@ type Vehicle struct {
 	destination       *domain.Position
 	currentTask       string
 	currentGeneration int
+
+	faultInjector *fault.Injector
 }
 
 func New(id string, position *domain.Position, client *mqtt.Client) *Vehicle {
 	return &Vehicle{
-		ID:       id,
-		Position: position,
-		client:   client,
+		ID:            id,
+		Position:      position,
+		client:        client,
+		faultInjector: fault.New(),
 	}
 }
 
@@ -43,7 +47,65 @@ func (v *Vehicle) Run() {
 	}
 }
 
-func (v *Vehicle) heartbeat() {
+func (c *Vehicle) AddFault(action fault.Action, sequence int, delay time.Duration) {
+	sequencePtr := &sequence
+	if sequence <= 0 {
+		sequencePtr = nil
+	}
+	c.faultInjector.AddRule(fault.Rule{
+		Action:    action,
+		VehicleID: "",
+		Sequence:  sequencePtr,
+		Delay:     delay,
+	})
+}
+
+func (v *Vehicle) publish(topic domain.Topic, sequence int, payload []byte) error {
+	if v.faultInjector.ShouldDrop(sequence, "") {
+		log.Printf(
+			"FAULT DROP heartbeat vehicle=%s sequence=%d",
+			v.ID,
+			sequence,
+		)
+		return nil
+	}
+	if delay := v.faultInjector.ShouldDelay(sequence, ""); delay != nil {
+		log.Printf(
+			"FAULT DELAY heartbeat vehicle=%s sequence=%d",
+			v.ID,
+			sequence,
+		)
+		go func(seq int) {
+			time.Sleep(*delay)
+			log.Printf("heartbeat: vehicle=%s, position=(%d,%d) sequence=%d", v.ID, v.Position.X, v.Position.Y, seq)
+			err := v.client.Publish(fmt.Sprintf("%s/%s", topic, v.ID), payload)
+			if err != nil {
+				log.Println("heartbeat failed:", err)
+			}
+		}(sequence)
+		return nil
+	}
+	if v.faultInjector.ShouldDuplicate(sequence, "") {
+		log.Printf(
+			"FAULT DUPLICATE heartbeat vehicle=%s sequence=%d",
+			v.ID,
+			sequence,
+		)
+		log.Printf("heartbeat: vehicle=%s, position=(%d,%d) sequence=%d", v.ID, v.Position.X, v.Position.Y, v.Sequence)
+		err := v.client.Publish(fmt.Sprintf("%s/%s", topic, v.ID), payload)
+		if err != nil {
+			log.Println("heartbeat failed:", err)
+		}
+	}
+	log.Printf("heartbeat: vehicle=%s, position=(%d,%d) sequence=%d", v.ID, v.Position.X, v.Position.Y, v.Sequence)
+	err := v.client.Publish(fmt.Sprintf("%s/%s", topic, v.ID), payload)
+	if err != nil {
+		log.Println("heartbeat failed:", err)
+	}
+	return err
+}
+
+func (v *Vehicle) heartbeat() error {
 	v.Sequence++
 
 	message := domain.HeartbeatMessage{
@@ -55,15 +117,12 @@ func (v *Vehicle) heartbeat() {
 	payload, err := json.Marshal(message)
 	if err != nil {
 		log.Println("failed to marshal heartbeat:", err)
-		return
+		return err
 	}
 
-	err = v.client.Publish(fmt.Sprintf("%s/%s", domain.TopicHeartbeat, v.ID), payload)
-	if err != nil {
-		log.Println("heartbeat failed:", err)
-	}
+	err = v.publish(domain.TopicHeartbeat, message.Sequence, payload)
 
-	log.Printf("heartbeat: vehicle=%s, position=(%d,%d) sequence=%d", v.ID, v.Position.X, v.Position.Y, v.Sequence)
+	return err
 }
 
 func (v *Vehicle) move() {
