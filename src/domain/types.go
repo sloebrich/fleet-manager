@@ -59,8 +59,10 @@ type AssignTaskMessage struct {
 	TaskID      string   `json:"taskId"`
 	Destination Position `json:"destination"`
 	Generation  int      `json:"generation"`
+	Sequence    int      `json:"sequence"`
 }
 
 type StopMessage struct {
-	Reason string `json:"reason"`
+	Reason   string `json:"reason"`
+	Sequence int    `json:"sequence"`
 }
