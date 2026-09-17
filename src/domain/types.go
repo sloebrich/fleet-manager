@@ -50,9 +50,10 @@ type VehicleState struct {
 }
 
 type HeartbeatMessage struct {
-	VehicleID string   `json:"vehicleId"`
-	Position  Position `json:"position"`
-	Sequence  int      `json:"sequence"`
+	VehicleID   string   `json:"vehicleId"`
+	Position    Position `json:"position"`
+	Sequence    int      `json:"sequence"`
+	CurrentTask string   `json:"currentTask"`
 }
 
 type AssignTaskMessage struct {

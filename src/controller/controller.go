@@ -103,14 +103,23 @@ func (c *Controller) heartbeat(
 		vehicle.LastSequence = req.Sequence
 
 		if task, ok := c.tasks[vehicle.CurrentTask]; ok && task.Status == domain.TaskInProgress {
-			if vehicle.Position.X == task.Destination.X && vehicle.Position.Y == task.Destination.Y {
+			if req.CurrentTask != vehicle.CurrentTask {
+				task.Status = domain.TaskQueued
+				task.AssignedVehicle = ""
+				if req.CurrentTask != "" {
+					c.stopVehicle(req.VehicleID, fmt.Sprintf("Vehicle was executing task %s, but task %s assigned in the controller ", req.CurrentTask, vehicle.CurrentTask))
+				}
+				vehicle.CurrentTask = ""
+				vehicle.Status = domain.VehicleIdle
+
+			} else if vehicle.Position.X == task.Destination.X && vehicle.Position.Y == task.Destination.Y {
 				task.Status = domain.TaskCompleted
 				vehicle.Status = domain.VehicleIdle
 				vehicle.CurrentTask = ""
 				log.Printf("task %s completed by %s", task.ID, vehicle.ID)
-
 			}
 		}
+
 	}
 
 	vehicle.LastHeartbeat = time.Now()

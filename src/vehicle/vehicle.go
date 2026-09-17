@@ -109,9 +109,10 @@ func (v *Vehicle) heartbeat() error {
 	v.Sequence++
 
 	message := domain.HeartbeatMessage{
-		VehicleID: v.ID,
-		Position:  *v.Position,
-		Sequence:  v.Sequence,
+		VehicleID:   v.ID,
+		Position:    *v.Position,
+		Sequence:    v.Sequence,
+		CurrentTask: v.currentTask,
 	}
 
 	payload, err := json.Marshal(message)

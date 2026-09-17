@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"fleet-manager/src/controller"
 	"fleet-manager/src/domain"
@@ -42,7 +41,7 @@ func main() {
 	controller.CreateTask("task-2", domain.Position{X: 15, Y: 15})
 	controller.CreateTask("task-3", domain.Position{X: 20, Y: 10})
 
-	controller.AddFault(fault.Delay, "v1", 1, 5*time.Second)
+	controller.AddFault(fault.Drop, "v1", 1, 0)
 	controller.AddFault(fault.Duplicate, "v1", 2, 0)
 
 	select {}
