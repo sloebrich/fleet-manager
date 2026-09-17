@@ -82,7 +82,7 @@ Vehicles are relatively dumb agents. They:
 # 2. Repository structure
 
 ```text
-fault-tolerant-fleet/
+fleet-manager/
 │
 ├── cmd/
 │   ├── controller/
@@ -93,143 +93,62 @@ fault-tolerant-fleet/
 │
 ├── src/
 │   ├── domain/
-│   │   └── domain.go
+│   │   └── types.go
 │   │
 │   ├── controller/
 │   │   └── controller.go
+│   │   └── http.go
 │   │
 │   ├── vehicle/
 │   │   └── vehicle.go
 │   │
-│   └── mqtt/
-│       └── client.go
-│
-├── state/
-│   └── .gitkeep
+│   │── mqtt/
+│   │   └── client.go
+│   │
+│   │── fault/
+│       └── injector.go
+│   
+├── web/
+│   └── index.html
 │
 ├── README.md
-├── ARCHITECTURE.md
 ├── go.mod
-└── Makefile
+├── go.sum
 ```
 
 Do not create all of these directories before they are needed. Start with the smallest working system and add pieces incrementally.
 
 ---
 
-# 3. Domain model
-
-## Position
-
-Vehicles move on a simple 2D integer grid.
-
-```go
-type Position struct {
-    X int32
-    Y int32
-}
-
-func (p Position) Equal(other Position) bool
-func (p Position) ManhattanDistance(other Position) int32
-```
-
-A vehicle moves one grid cell at a time.
-
-There is deliberately **no graph representation** and no sophisticated pathfinding.
-
----
-
-## Task
-
-A task only has a destination.
-
-```go
-type TaskState int
-
-const (
-    TaskQueued TaskState = iota
-    TaskInProgress
-    TaskCompleted
-)
-
-type Task struct {
-    ID                   string
-    Destination          Position
-    State                TaskState
-    AssignedVehicle      string
-    AssignmentGeneration uint64
-}
-```
-
-There are deliberately no:
-
-- loading/unloading operations
-- pickup locations
-- cargo
-- priorities
-- routes
-- reservations
-
-When a vehicle reports a position equal to the task destination, the controller completes the task.
-
-There is therefore **no separate completion message**.
-
----
-
-## Vehicle
-
-```go
-type VehicleStatus int
-
-const (
-    VehicleIdle VehicleStatus = iota
-    VehicleWorking
-    VehicleOffline
-)
-
-type Vehicle struct {
-    ID            string
-    Position      Position
-    Status        VehicleStatus
-    CurrentTask   string
-    LastHeartbeat time.Time
-    LastSequence  uint64
-}
-```
-
-The controller stores the authoritative position and state.
-
----
-
-# 4. Message protocol
+# 3. Message protocol
 
 Communication is JSON-encoded and sent over MQTT topics.
 
 ## Vehicle → Controller
 
 **Heartbeat** (published every second)
-- Topic: `fleet/heartbeat/{vehicle_id}`
+- Topic: `heartbeat/{vehicle_id}`
 - Payload: JSON with vehicle_id, position, sequence
 
 ## Controller → Vehicle
 
 **AssignTask** (published when task is assigned)
-- Topic: `fleet/vehicle/{vehicle_id}/task`
+- Topic: `task/{vehicle_id}`
 - Payload: JSON with task_id, destination, generation
 
 **Stop** (published when task is reassigned or vehicle fails)
-- Topic: `fleet/vehicle/{vehicle_id}/stop`
+- Topic: `stop/{vehicle_id}`
 - Payload: JSON with reason
 
 ---
 
-# 5. Message definitions (JSON)
+# 4. Message definitions (JSON)
 
 All messages are JSON. Vehicles and controller encode/decode them.
 
 ## Heartbeat
 
-Published by vehicle to `fleet/heartbeat/{vehicle_id}`:
+Published by vehicle to `heartbeat/{vehicle_id}`:
 
 ```json
 {
@@ -244,7 +163,7 @@ Published by vehicle to `fleet/heartbeat/{vehicle_id}`:
 
 ## AssignTask
 
-Published by controller to `fleet/vehicle/{vehicle_id}/task`:
+Published by controller to `task/{vehicle_id}`:
 
 ```json
 {
@@ -259,7 +178,7 @@ Published by controller to `fleet/vehicle/{vehicle_id}/task`:
 
 ## Stop
 
-Published by controller to `fleet/vehicle/{vehicle_id}/stop`:
+Published by controller to `stop/{vehicle_id}`:
 
 ```json
 {
@@ -269,21 +188,21 @@ Published by controller to `fleet/vehicle/{vehicle_id}/stop`:
 
 ---
 
-# 6. Message semantics
+# 5. Message semantics
 
 ## Heartbeat
 
 Vehicle publishes periodically:
 
 ```text
-V1 → broker  fleet/heartbeat/vehicle-1
+V1 → broker  heartbeat/vehicle-1
              {
                "vehicle_id": "vehicle-1",
                "position": {"x": 7, "y": 3},
                "sequence": 41
              }
 
-Controller subscribes to fleet/heartbeat/+
+Controller subscribes to heartbeat/+
 Receives on callback
 Extracts position, sequence
 Updates authoritative state
@@ -302,14 +221,14 @@ Position updates are embedded in the heartbeat (no separate UpdatePosition messa
 When a vehicle is idle and a task is queued, the controller publishes:
 
 ```text
-C → broker  fleet/vehicle/vehicle-1/task
+C → broker  task/vehicle-1
             {
               "task_id": "task-1",
               "destination": {"x": 10, "y": 5},
               "generation": 1
             }
 
-V1 subscribes to fleet/vehicle/vehicle-1/task
+V1 subscribes to task/vehicle-1
 Receives on callback
 Extracts task_id, destination, generation
 Sets destination
@@ -319,7 +238,7 @@ Begins moving
 Generation identifies the version of the assignment. If a task is later reassigned:
 
 ```text
-C → broker  fleet/vehicle/vehicle-2/task
+C → broker  task/vehicle-2
             {
               "task_id": "task-1",
               "destination": {"x": 10, "y": 5},
@@ -340,12 +259,12 @@ Generation 2 supersedes generation 1.
 The controller can tell a vehicle to stop executing an obsolete assignment.
 
 ```text
-C → broker  fleet/vehicle/vehicle-1/stop
+C → broker  stop/vehicle-1
             {
               "reason": "task reassigned"
             }
 
-V1 subscribes to fleet/vehicle/vehicle-1/stop
+V1 subscribes to stop/vehicle-1
 Receives on callback
 Clears destination
 Stops moving
@@ -355,7 +274,7 @@ This is important after failure detection or reassignment.
 
 ---
 
-# 7. Failure handling
+# 6. Failure handling
 
 A heartbeat timeout does **not** prove that a vehicle has crashed.
 
@@ -424,7 +343,7 @@ This does **not** eliminate false positives. It makes communication loss fail sa
 
 ---
 
-# 8. Why no fencing tokens?
+# 7. Why no fencing tokens?
 
 The project does not implement full fencing tokens or leases.
 
@@ -452,7 +371,7 @@ That complexity is intentionally outside the project's scope.
 
 ---
 
-# 9. Message faults
+# 8. Message faults
 
 The project can simulate unreliable message delivery at the application level.
 
@@ -501,7 +420,7 @@ type FaultRule struct {
 
 ---
 
-# 10. Persistence
+# 9. Persistence
 
 No real database is necessary.
 
@@ -524,7 +443,7 @@ The purpose is to demonstrate controller process recovery.
 
 ---
 
-# 11. Scheduler
+# 10. Scheduler
 
 Keep scheduling simple.
 
@@ -555,7 +474,7 @@ The scheduler is not the interesting part of the project.
 
 ---
 
-# 12. Implementation order
+# 11. Implementation order
 
 Build incrementally.
 
@@ -689,7 +608,7 @@ system resumes
 
 ---
 
-# 13. What not to build
+# 12. What not to build
 
 Do not add complexity just because it sounds impressive.
 
@@ -718,37 +637,7 @@ The project should remain small enough that you can understand and explain essen
 
 ---
 
-# 14. What makes this a good portfolio project
-
-The fleet simulation itself is not the main achievement.
-
-The useful abstraction is:
-
-```text
-independent processes
-        +
-real network
-        +
-concurrent execution
-        +
-unreliable delivery
-        +
-partial failure
-        +
-distributed state
-        +
-recovery
-```
-
-The simple fleet domain provides a concrete way to demonstrate those concepts.
-
-A good interview explanation is:
-
-> "The fleet simulation isn't really the point. I deliberately kept the domain simple so that the complexity would come from distributed coordination rather than route planning or business logic. The vehicles are independent processes communicating over MQTT, which gives me realistic scenarios for message loss, duplication, reordering, delayed messages, process failure, reassignment, and recovery. Everything is JSON-encoded; the interesting part is handling partial failure and state consistency, not transport mechanics."
-
----
-
-# 15. Definition of done
+# 13. Definition of done
 
 The project is finished when you can reliably demonstrate:
 
