@@ -1,0 +1,28 @@
+services:
+  broker: 
+    image: eclipse-mosquitto:2
+    volumes: 
+          - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+  controller:
+    build: .
+    command: 
+      - /app/controller
+      - -broker
+      - broker:1883
+    depends_on:
+      - broker
+  vehicle-1:
+    build: .
+    command:
+      - /app/vehicle
+      - -id
+      - vehicle-1
+      - -startX
+      - "10"
+      - -startY 
+      - "-10"
+      - -broker
+      - broker:1883
+    depends_on:
+      - broker
+

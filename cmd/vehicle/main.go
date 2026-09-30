@@ -17,6 +17,7 @@ func main() {
 	vehicleId := flag.String("id", "", "Unique identifier for the vehicle (required)")
 	startX := flag.Int("startX", 0, "Starting X position of the vehicle")
 	startY := flag.Int("startY", 0, "Starting Y position of the vehicle")
+	brokerURL := flag.String("broker", "tcp://localhost:9090", "MQTT broker URL")
 	flag.Parse()
 
 	if *vehicleId == "" {
@@ -24,7 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := mqtt.New(*vehicleId, "tcp://localhost:1883")
+	client, err := mqtt.New(*vehicleId, *brokerURL)
 	if err != nil {
 		log.Fatal(err)
 	}

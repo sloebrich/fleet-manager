@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,7 +13,10 @@ import (
 )
 
 func main() {
-	client, err := mqtt.New("controller", "tcp://localhost:1883")
+	brokerURL := flag.String("broker", "tcp://localhost:9090", "MQTT broker URL")
+	flag.Parse()
+
+	client, err := mqtt.New("controller", *brokerURL)
 	if err != nil {
 		log.Fatal(err)
 	}
