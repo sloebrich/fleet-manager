@@ -284,9 +284,6 @@ func (c *Controller) assignTask(task *domain.Task, vehicle *domain.VehicleState)
 }
 
 func (c *Controller) stopVehicle(vehicleId string, reason string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	sequence := c.nextMessageSequence(vehicleId)
 
 	message := domain.StopMessage{
