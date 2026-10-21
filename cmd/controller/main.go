@@ -41,7 +41,7 @@ func main() {
 
 	log.Println("Controller running")
 
-	scenario, err := config.LoadScenario("../../scenario/scenario.json")
+	scenario, err := config.LoadScenario("../../scenarios/scenario.json")
 	if err != nil {
 		log.Fatal(err)
 	}
