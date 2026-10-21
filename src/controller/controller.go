@@ -149,7 +149,7 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 		}()
 		return nil
 	}
-	if c.faultInjector.ShouldDuplicate(sequence, "") {
+	if c.faultInjector.ShouldDuplicate(sequence, vehicleID) {
 		log.Printf(
 			"FAULT DUPLICATE heartbeat vehicle=%s sequence=%d",
 			vehicleID,
