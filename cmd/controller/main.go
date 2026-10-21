@@ -6,9 +6,9 @@ import (
 	"log"
 	"net/http"
 
+	"fleet-manager/src/config"
 	"fleet-manager/src/controller"
 	"fleet-manager/src/domain"
-	"fleet-manager/src/fault"
 	mqtt "fleet-manager/src/mqtt"
 )
 
@@ -41,12 +41,37 @@ func main() {
 
 	log.Println("Controller running")
 
-	controller.CreateTask("task-1", domain.Position{X: 10, Y: 5})
-	controller.CreateTask("task-2", domain.Position{X: 15, Y: 15})
-	controller.CreateTask("task-3", domain.Position{X: 20, Y: 10})
+	scenario, err := config.LoadScenario("../../scenario/scenario.json")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	controller.AddFault(fault.Drop, "v1", 1, 0)
-	controller.AddFault(fault.Duplicate, "v1", 2, 0)
+	log.Printf("loaded %d tasks and %d faults", len(scenario.Tasks), len(scenario.Faults))
+
+	for _, task := range scenario.Tasks {
+		controller.CreateTask(task.ID, task.Destination)
+	}
+
+	for _, f := range scenario.Faults {
+		log.Printf(
+			"adding fault: action=%s vehicle=%s sequence=%d",
+			f.Action,
+			f.VehicleID,
+			f.Sequence,
+		)
+
+		action, err := config.ParseFaultAction(f.Action)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		controller.AddFault(
+			action,
+			f.VehicleID,
+			f.Sequence,
+			0,
+		)
+	}
 
 	select {}
 }
