@@ -9,17 +9,12 @@ The fleet domain is intentionally simple: vehicles are independent processes mov
 - Independent Go processes communicating over MQTT pub/sub
 - Goroutine-based concurrency
 - Automatic heartbeats and failure detection
-- Dropped, delayed, duplicated, and reordered messages
-- Sequence numbers and stale-message handling
-- Task reassignment after vehicle failure
-- Controller persistence and restart/recovery
-- Vehicle reconnection
-- Deterministic failure/integration tests
+- Dropped, delayed, and duplicated messages (deterministic fault injection)
+- Sequence numbers and stale-heartbeat handling
+- Generation-based stale-assignment handling on the vehicle
+- Task requeue and reassignment after vehicle failure
+- Vehicle reconnection (an offline vehicle is marked online again on its next heartbeat)
 - A minimal browser visualization
-
-The guiding rule is:
-
-> Every piece of complexity should exist because it demonstrates a concrete distributed-systems problem. If a feature does not help demonstrate one, leave it out.
 
 ---
 
@@ -49,7 +44,7 @@ The system consists of a central controller and multiple independent vehicle pro
                      │ state      │ │ heartbeat │
                      │ scheduler  │ │ publisher │
                      │ detector   │ │           │
-                     │ persistence│ │           │
+                     │ http api   │ │           │
                      └────────────┘ └─────┬─────┘
                                           │
                                      ┌─────▼─────┐
@@ -75,7 +70,6 @@ Vehicles are relatively dumb agents. They:
 - publish position updates via heartbeat
 - publish heartbeats automatically
 - execute assignments
-- stop if they fail to connect or receive messages from the broker
 
 ---
 
@@ -92,31 +86,42 @@ fleet-manager/
 │       └── main.go
 │
 ├── src/
+│   ├── config/
+│   │   ├── scenario.go
+│   │   └── scenario_test.go
+│   │
+│   ├── controller/
+│   │   ├── controller.go
+│   │   └── http.go
+│   │
 │   ├── domain/
 │   │   └── types.go
 │   │
-│   ├── controller/
-│   │   └── controller.go
-│   │   └── http.go
+│   ├── fault/
+│   │   └── injector.go
 │   │
-│   ├── vehicle/
-│   │   └── vehicle.go
-│   │
-│   │── mqtt/
+│   ├── mqtt/
 │   │   └── client.go
 │   │
-│   │── fault/
-│       └── injector.go
-│   
+│   └── vehicle/
+│       └── vehicle.go
+│
+├── scenarios/
+│   └── scenario.json
+│
 ├── web/
 │   └── index.html
 │
+├── docker/
+│   └── mosquitto/
+│       └── mosquitto.conf
+│
+├── Dockerfile
+├── docker-compose.yml
 ├── README.md
 ├── go.mod
 ├── go.sum
 ```
-
-Do not create all of these directories before they are needed. Start with the smallest working system and add pieces incrementally.
 
 ---
 
@@ -128,17 +133,19 @@ Communication is JSON-encoded and sent over MQTT topics.
 
 **Heartbeat** (published every second)
 - Topic: `heartbeat/{vehicle_id}`
-- Payload: JSON with vehicle_id, position, sequence
+- Payload: JSON with vehicleId, position, sequence, currentTask
 
 ## Controller → Vehicle
 
 **AssignTask** (published when task is assigned)
 - Topic: `task/{vehicle_id}`
-- Payload: JSON with task_id, destination, generation
+- Payload: JSON with taskId, destination, generation, sequence
 
 **Stop** (published when task is reassigned or vehicle fails)
 - Topic: `stop/{vehicle_id}`
-- Payload: JSON with reason
+- Payload: JSON with reason, sequence
+
+The `sequence` on controller → vehicle messages is a per-vehicle counter shared by AssignTask and Stop. Fault rules match on it.
 
 ---
 
@@ -152,12 +159,13 @@ Published by vehicle to `heartbeat/{vehicle_id}`:
 
 ```json
 {
-  "vehicle_id": "vehicle-1",
+  "vehicleId": "vehicle-1",
   "position": {
     "x": 5,
     "y": 3
   },
-  "sequence": 42
+  "sequence": 42,
+  "currentTask": "task-1"
 }
 ```
 
@@ -167,12 +175,13 @@ Published by controller to `task/{vehicle_id}`:
 
 ```json
 {
-  "task_id": "task-1",
+  "taskId": "task-1",
   "destination": {
     "x": 10,
     "y": 5
   },
-  "generation": 1
+  "generation": 1,
+  "sequence": 1
 }
 ```
 
@@ -182,7 +191,8 @@ Published by controller to `stop/{vehicle_id}`:
 
 ```json
 {
-  "reason": "task reassigned"
+  "reason": "task reassigned",
+  "sequence": 2
 }
 ```
 
@@ -197,14 +207,15 @@ Vehicle publishes periodically:
 ```text
 V1 → broker  heartbeat/vehicle-1
              {
-               "vehicle_id": "vehicle-1",
+               "vehicleId": "vehicle-1",
                "position": {"x": 7, "y": 3},
-               "sequence": 41
+               "sequence": 41,
+               "currentTask": "task-1"
              }
 
 Controller subscribes to heartbeat/+
 Receives on callback
-Extracts position, sequence
+Extracts position, sequence, currentTask
 Updates authoritative state
 Checks if task is complete
 Records timestamp
@@ -213,6 +224,10 @@ Records timestamp
 The controller records the time at which the heartbeat was received.
 
 Position updates are embedded in the heartbeat (no separate UpdatePosition message).
+
+Heartbeats with a sequence number at or below the last one seen are treated as stale: they only refresh the timestamp, not the position or task state.
+
+Each heartbeat also reports the vehicle's `currentTask`. If the controller has a task in progress for that vehicle and the vehicle reports a different one, the controller requeues the task and, if the vehicle is running something else, sends it a Stop.
 
 ---
 
@@ -223,14 +238,15 @@ When a vehicle is idle and a task is queued, the controller publishes:
 ```text
 C → broker  task/vehicle-1
             {
-              "task_id": "task-1",
+              "taskId": "task-1",
               "destination": {"x": 10, "y": 5},
-              "generation": 1
+              "generation": 1,
+              "sequence": 1
             }
 
 V1 subscribes to task/vehicle-1
 Receives on callback
-Extracts task_id, destination, generation
+Extracts taskId, destination, generation
 Sets destination
 Begins moving
 ```
@@ -240,9 +256,10 @@ Generation identifies the version of the assignment. If a task is later reassign
 ```text
 C → broker  task/vehicle-2
             {
-              "task_id": "task-1",
+              "taskId": "task-1",
               "destination": {"x": 10, "y": 5},
-              "generation": 2
+              "generation": 2,
+              "sequence": 1
             }
 
 V2 receives generation=2
@@ -261,7 +278,8 @@ The controller can tell a vehicle to stop executing an obsolete assignment.
 ```text
 C → broker  stop/vehicle-1
             {
-              "reason": "task reassigned"
+              "reason": "task reassigned",
+              "sequence": 2
             }
 
 V1 subscribes to stop/vehicle-1
@@ -308,39 +326,6 @@ scheduler:
     may assign task to another vehicle
 ```
 
-## Vehicle-side timeout
-
-The vehicle also monitors its connection to the broker.
-
-If it cannot receive any messages for its own timeout:
-
-```text
-V1:
-
-broker connection lost
-        ↓
-STOP moving
-```
-
-This gives a useful safety property:
-
-```text
-             broker lost / partitioned
-                   │
-         ┌─────────┴─────────┐
-         ▼                   ▼
-   Controller             Vehicle
-   can't hear V1          can't reach broker
-         │                   │
-         ▼                   ▼
-   V1 OFFLINE             STOP
-         │
-         ▼
-   task reassigned
-```
-
-This does **not** eliminate false positives. It makes communication loss fail safer.
-
 ---
 
 # 7. Why no fencing tokens?
@@ -375,81 +360,40 @@ That complexity is intentionally outside the project's scope.
 
 The project can simulate unreliable message delivery at the application level.
 
-The MQTT broker itself delivers reliably (QoS 1), but we can inject faults in callbacks:
+The MQTT broker itself delivers reliably (QoS 1), but both the controller and the vehicles can inject faults when they publish:
 
 ```text
-Vehicle publishes heartbeat
+Sender builds message
+   │
+   ▼
+publish()
+   │
+   ├── DROP (don't send)
+   ├── DELAY (send after N)
+   └── DUPLICATE (send twice)
    │
    ▼
 MQTT Broker (reliable delivery)
-   │
-   ▼
-Controller callback
-   │
-   ├── DROP (ignore the message)
-   ├── DELAY (process after N seconds)
-   ├── DUPLICATE (process twice)
-   └── REORDER (hold, process out of order)
-   │
-   ▼
-Update state
 ```
 
-Start with deterministic, one-shot faults.
-
-Possible API:
+Faults are deterministic rules matched against the sender's own `sequence` number:
 
 ```go
-type FaultAction int
-
-const (
-    NoFault FaultAction = iota
-    Drop
-    Delay
-    Duplicate
-)
-
-type FaultRule struct {
-    MessageType string    // "heartbeat", "assigntask", "stop"
-    VehicleID   string
-    Sequence    uint64
-    Action      FaultAction
-    Delay       time.Duration
+type Rule struct {
+    VehicleID string        // "" matches any vehicle
+    Sequence  *int          // nil matches any sequence
+    Action    Action        // Drop, Delay, Duplicate
+    Delay     time.Duration // used by Delay
 }
 ```
 
----
-
-# 9. Persistence
-
-No real database is necessary.
-
-The controller persists its state to a local JSON file:
-
-```text
-state/state.json
-```
-
-Minimal interface:
-
-```go
-type Store interface {
-    Load() (State, error)
-    Save(State) error
-}
-```
-
-The purpose is to demonstrate controller process recovery.
+Vehicle rules affect heartbeats and are registered in `cmd/vehicle/main.go`. Controller rules affect AssignTask and Stop and are loaded from `scenarios/scenario.json`.
 
 ---
 
-# 10. Scheduler
+# 9. Scheduler
 
-Keep scheduling simple.
-
-A suitable initial implementation:
-
-> Assign the task to the idle vehicle with the smallest Manhattan distance to the destination.
+Tasks are assigned to the idle vehicle with the smallest Manhattan distance to the destination.
 
 For example:
 
@@ -468,210 +412,11 @@ V2:
 → assign T1 to V1
 ```
 
-Do not build a generic optimization framework.
-
-The scheduler is not the interesting part of the project.
-
 ---
 
-# 11. Implementation order
+# 10. Next
 
-Build incrementally.
-
-### Sprint 1 — basic distributed system
-
-1. Create Go module
-2. Define domain types
-3. Implement controller process
-4. Implement vehicle process
-5. Connect to shared MQTT broker
-6. Implement heartbeat publish/subscribe
-7. Implement task assignment publish/subscribe
-
-Goal:
-
-```text
-Controller ←──── MQTT ────→ Vehicle
-
-task assignment works
-```
-
----
-
-### Sprint 2 — movement
-
-1. Implement 2D position
-2. Implement vehicle movement
-3. Move one grid cell at a time
-4. Include position in heartbeat
-5. Complete task when destination is reached
-
-Goal:
-
-```text
-Controller → Vehicle  AssignTask
-
-Vehicle moves:
-
-(0,0)
-(1,0)
-(2,0)
-...
-(10,5)
-
-Vehicle → Controller  Heartbeat
-          ...
-
-Controller:
-    task completed
-```
-
----
-
-### Sprint 3 — liveness
-
-1. Add automatic heartbeat goroutine
-2. Record last heartbeat timestamp
-3. Implement controller failure detector
-4. Mark vehicles offline
-5. Requeue their tasks
-6. Implement vehicle-side broker connection timeout
-7. Stop vehicle on connection loss
-
-Goal:
-
-```text
-vehicle disconnects
-       ↓
-controller detects timeout
-       ↓
-task requeued
-       ↓
-another vehicle receives task
-```
-
----
-
-### Sprint 4 — message faults
-
-1. Add deterministic fault injector
-2. Implement message drop (in callback)
-3. Implement delay (queue message, process later)
-4. Implement duplication (process twice)
-5. Implement reordering (hold/release)
-6. Add sequence numbers
-7. Reject stale/duplicate heartbeats
-
-Goal:
-
-The system continues to behave correctly despite unreliable delivery.
-
----
-
-### Sprint 5 — recovery
-
-1. Add local JSON persistence
-2. Persist controller state
-3. Simulate controller crash
-4. Reload state on restart
-5. Vehicles stay connected to broker during controller downtime
-6. Reconcile vehicle and controller state
-7. Handle stale assignments
-
-Goal:
-
-```text
-controller crashes
-       ↓
-state persists to disk
-       ↓
-controller restarts
-       ↓
-loads state from disk
-       ↓
-vehicles continue heartbeating
-       ↓
-system resumes
-```
-
----
-
-### Sprint 6 — tests and visualization
-
-1. Implement deterministic integration tests
-2. Reproduce core scenarios
-3. Add structured message logging
-4. Build minimal HTML visualization
-5. Display vehicles/tasks
-6. Display online/offline state
-7. Display event/message log
-
----
-
-# 12. What not to build
-
-Do not add complexity just because it sounds impressive.
-
-Specifically avoid initially:
-
-- graph-based route planning
-- A*
-- sophisticated optimization
-- loading/unloading
-- cargo management
-- reservations
-- fencing-token infrastructure
-- distributed consensus
-- Raft
-- Kafka (MQTT is lighter-weight for this demo)
-- Redis
-- Kubernetes
-- service meshes
-- React
-- TypeScript frontend
-- real database
-- cloud deployment
-- authentication
-
-The project should remain small enough that you can understand and explain essentially every important line.
-
----
-
-# 13. Definition of done
-
-The project is finished when you can reliably demonstrate:
-
-```text
-✓ Start controller
-✓ Start multiple vehicles
-✓ Create tasks
-✓ Assign tasks via MQTT
-✓ Vehicles move on a 2D grid
-✓ Vehicles send automatic heartbeats
-✓ Position updates embedded in heartbeats
-✓ Tasks complete automatically at destination
-
-✓ Drop messages
-✓ Delay messages
-✓ Duplicate messages
-✓ Reorder messages
-
-✓ Detect vehicle communication failure
-✓ Requeue its task
-✓ Reassign the task
-✓ Prevent stale updates from corrupting state
-
-✓ Crash controller
-✓ Restart controller
-✓ Reload persistent state
-✓ Continue receiving heartbeats from vehicles
-✓ Reconcile state
-
-✓ Run deterministic integration tests
-✓ See the system in a simple browser UI
-✓ See the message/event log
-```
-
-If all of this works and you can explain **why every mechanism exists and what failure it handles**, stop.
-
-Do not keep adding features simply to make the repository larger.
+- Reordering fault (hold a message and release it out of order)
+- Vehicle-side broker timeout: stop moving when no messages arrive from the broker
+- Controller persistence: save state to disk and reconcile with vehicles on restart
+- Deterministic integration tests for the fault scenarios (only the scenario loader has a unit test today)
