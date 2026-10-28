@@ -14,6 +14,7 @@ import (
 
 func main() {
 	brokerURL := flag.String("broker", "tcp://localhost:9090", "MQTT broker URL")
+	scenarioPath := flag.String("scenario", "scenarios/scenario.json", "path to scenario file")
 	flag.Parse()
 
 	client, err := mqtt.New("controller", *brokerURL)
@@ -41,7 +42,7 @@ func main() {
 
 	log.Println("Controller running")
 
-	scenario, err := config.LoadScenario("../../scenarios/scenario.json")
+	scenario, err := config.LoadScenario(*scenarioPath)
 	if err != nil {
 		log.Fatal(err)
 	}

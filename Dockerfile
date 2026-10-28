@@ -16,5 +16,6 @@ WORKDIR /app
 
 COPY --from=builder /app/controller .
 COPY --from=builder /app/vehicle .
+COPY --from=builder /app/scenarios ./scenarios
 
 CMD ["/app/controller"]

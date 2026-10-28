@@ -9,6 +9,8 @@ services:
       - /app/controller
       - -broker
       - broker:1883
+    volumes:
+      - ./scenarios:/app/scenarios:ro
     depends_on:
       - broker
   vehicle-1:
