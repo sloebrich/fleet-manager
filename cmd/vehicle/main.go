@@ -19,7 +19,7 @@ func main() {
 	startX := flag.Int("startX", 0, "Starting X position of the vehicle")
 	startY := flag.Int("startY", 0, "Starting Y position of the vehicle")
 	brokerURL := flag.String("broker", "tcp://localhost:9090", "MQTT broker URL")
-	scenarioPath := flag.String("scenario", "scenarios/scenario.json", "path to scenario file")
+	scenarioPath := flag.String("scenario", "scenarios/no_faults.json", "path to scenario file")
 	flag.Parse()
 
 	if *vehicleId == "" {

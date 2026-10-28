@@ -15,7 +15,7 @@ services:
       - -broker
       - broker:1883
       - -scenario
-      - ${SCENARIO:-scenarios/scenario.json}
+      - ${SCENARIO:-scenarios/no_faults.json}
     ports:
       - "8080:8080"
     volumes:
