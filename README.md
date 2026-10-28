@@ -253,20 +253,6 @@ Messages are JSON payloads carried over MQTT topics. The documented topic patter
 
 See the source under [`src/`](src/) for the current implementation and configuration details.
 
-## Tests
-
-Run the Go test suite from the repository root:
-
-```bash
-go test ./...
-```
-
-For more detail on a failing test:
-
-```bash
-go test -v ./...
-```
-
 ## Repository layout
 
 ```text
