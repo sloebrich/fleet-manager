@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
+	"fleet-manager/src/config"
 	"fleet-manager/src/domain"
+	"fleet-manager/src/fault"
 	mqtt "fleet-manager/src/mqtt"
 	"fleet-manager/src/vehicle"
 )
@@ -16,6 +19,7 @@ func main() {
 	startX := flag.Int("startX", 0, "Starting X position of the vehicle")
 	startY := flag.Int("startY", 0, "Starting Y position of the vehicle")
 	brokerURL := flag.String("broker", "tcp://localhost:9090", "MQTT broker URL")
+	scenarioPath := flag.String("scenario", "scenarios/scenario.json", "path to scenario file")
 	flag.Parse()
 
 	if *vehicleId == "" {
@@ -30,6 +34,36 @@ func main() {
 	defer client.Close()
 
 	v := vehicle.New(*vehicleId, &domain.Position{X: *startX, Y: *startY}, client)
+
+	scenario, err := config.LoadScenario(*scenarioPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, f := range scenario.VehicleFaults {
+		if f.VehicleID != "" && f.VehicleID != *vehicleId {
+			continue
+		}
+
+		log.Printf(
+			"adding vehicle fault: action=%s sequence=%d delay_ms=%d",
+			f.Action,
+			f.Sequence,
+			f.DelayMS,
+		)
+
+		action, err := config.ParseFaultAction(f.Action)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		delay := time.Duration(f.DelayMS) * time.Millisecond
+		if action == fault.Delay && delay <= 0 {
+			log.Fatalf("delay fault for vehicle=%q sequence=%d needs delay_ms > 0", f.VehicleID, f.Sequence)
+		}
+
+		v.AddFault(action, f.Sequence, delay)
+	}
 
 	err = client.Subscribe(fmt.Sprintf("%s/%s", domain.TopicTask, *vehicleId), v.HandleTask)
 	if err != nil {

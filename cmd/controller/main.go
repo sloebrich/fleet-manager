@@ -49,13 +49,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("loaded %d tasks and %d faults", len(scenario.Tasks), len(scenario.Faults))
+	log.Printf("loaded %d tasks and %d controller faults", len(scenario.Tasks), len(scenario.ControllerFaults))
 
 	for _, task := range scenario.Tasks {
 		controller.CreateTask(task.ID, task.Destination)
 	}
 
-	for _, f := range scenario.Faults {
+	for _, f := range scenario.ControllerFaults {
 		log.Printf(
 			"adding fault: action=%s vehicle=%s sequence=%d delay_ms=%d",
 			f.Action,

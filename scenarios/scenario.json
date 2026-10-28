@@ -22,7 +22,7 @@
       }
     }
   ],
-  "faults": [
+  "controller_faults": [
     {
       "action": "drop",
       "vehicle_id": "vehicle-1",

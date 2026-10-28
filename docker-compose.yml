@@ -36,6 +36,10 @@ services:
       - "-10"
       - -broker
       - broker:1883
+      - -scenario
+      - ${SCENARIO:-scenarios/scenario.json}
+    volumes:
+      - ./scenarios:/app/scenarios:ro
     depends_on:
       broker:
         condition: service_healthy
@@ -52,6 +56,10 @@ services:
       - "10"
       - -broker
       - broker:1883
+      - -scenario
+      - ${SCENARIO:-scenarios/scenario.json}
+    volumes:
+      - ./scenarios:/app/scenarios:ro
     depends_on:
       broker:
         condition: service_healthy
@@ -68,6 +76,10 @@ services:
       - "-10"
       - -broker
       - broker:1883
+      - -scenario
+      - ${SCENARIO:-scenarios/scenario.json}
+    volumes:
+      - ./scenarios:/app/scenarios:ro
     depends_on:
       broker:
         condition: service_healthy
