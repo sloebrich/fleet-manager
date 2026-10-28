@@ -1,11 +1,16 @@
 services:
-  broker: 
+  broker:
     image: eclipse-mosquitto:2
-    volumes: 
-          - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/#' -C 1 -W 3 -i healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
   controller:
     build: .
-    command: 
+    command:
       - /app/controller
       - -broker
       - broker:1883
@@ -14,7 +19,9 @@ services:
     volumes:
       - ./scenarios:/app/scenarios:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
+    restart: unless-stopped
   vehicle-1:
     build: .
     command:
@@ -23,12 +30,14 @@ services:
       - vehicle-1
       - -startX
       - "10"
-      - -startY 
+      - -startY
       - "-10"
       - -broker
       - broker:1883
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
+    restart: unless-stopped
   web:
     image: nginx:alpine
     ports:
@@ -36,4 +45,3 @@ services:
     volumes:
       - ./web:/usr/share/nginx/html:ro
     restart: unless-stopped
-

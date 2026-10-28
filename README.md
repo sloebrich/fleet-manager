@@ -34,16 +34,28 @@ Typical message flow:
 - The controller publishes task assignments and stop commands on vehicle-specific topics.
 - The UI presents the current simulation state.
 
-## Prerequisites
+## Quick start (Docker)
+
+The only requirements are [Docker](https://docs.docker.com/get-docker/) with Compose and a modern browser. From the repository root:
+
+```bash
+docker compose up --build
+```
+
+This builds the Go programs and starts the MQTT broker, the controller, one vehicle, and the web UI. Then open <http://localhost:8000>. The controller's HTTP API is published on <http://localhost:8080>.
+
+Stop everything with `Ctrl+C`, and remove the containers with `docker compose down`.
+
+## Run without Docker
+
+### Prerequisites
 
 - [Go](https://go.dev/dl/) compatible with the version declared in [`go.mod`](go.mod)
 - An MQTT broker, such as [Eclipse Mosquitto](https://mosquitto.org/)
-- [Docker](https://docs.docker.com/get-docker/) with Compose, to serve the web UI (and optionally run the whole system)
+- [Docker](https://docs.docker.com/get-docker/) with Compose, to serve the web UI
 - A modern browser for the UI
 
 The commands below assume the broker is reachable at `localhost:1883`, which is the common local Mosquitto address. If your broker uses another address, configure the application accordingly.
-
-## Build and run
 
 Run these commands from the repository root.
 
@@ -87,14 +99,6 @@ docker compose up -d web
 ```
 
 Then open <http://localhost:8000> in your browser. The UI polls the controller at `http://localhost:8080/api/state`, so the controller must be running and reachable on port 8080. Stop the UI with `docker compose stop web`.
-
-To run the whole system in containers instead (broker, controller, one vehicle, and the UI), skip steps 1 and 2 and run:
-
-```bash
-docker compose up --build
-```
-
-The UI is then at <http://localhost:8000> and the controller's HTTP API is published on <http://localhost:8080>.
 
 ## Configuration and message flow
 
