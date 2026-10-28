@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"fleet-manager/src/config"
 	"fleet-manager/src/controller"
 	"fleet-manager/src/domain"
+	"fleet-manager/src/fault"
 	mqtt "fleet-manager/src/mqtt"
 )
 
@@ -55,10 +57,11 @@ func main() {
 
 	for _, f := range scenario.Faults {
 		log.Printf(
-			"adding fault: action=%s vehicle=%s sequence=%d",
+			"adding fault: action=%s vehicle=%s sequence=%d delay_ms=%d",
 			f.Action,
 			f.VehicleID,
 			f.Sequence,
+			f.DelayMS,
 		)
 
 		action, err := config.ParseFaultAction(f.Action)
@@ -66,11 +69,16 @@ func main() {
 			log.Fatal(err)
 		}
 
+		delay := time.Duration(f.DelayMS) * time.Millisecond
+		if action == fault.Delay && delay <= 0 {
+			log.Fatalf("delay fault for vehicle=%q sequence=%d needs delay_ms > 0", f.VehicleID, f.Sequence)
+		}
+
 		controller.AddFault(
 			action,
 			f.VehicleID,
 			f.Sequence,
-			0,
+			delay,
 		)
 	}
 

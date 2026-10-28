@@ -14,6 +14,8 @@ services:
       - /app/controller
       - -broker
       - broker:1883
+      - -scenario
+      - ${SCENARIO:-scenarios/scenario.json}
     ports:
       - "8080:8080"
     volumes:
@@ -30,6 +32,38 @@ services:
       - vehicle-1
       - -startX
       - "10"
+      - -startY
+      - "-10"
+      - -broker
+      - broker:1883
+    depends_on:
+      broker:
+        condition: service_healthy
+    restart: unless-stopped
+  vehicle-2:
+    build: .
+    command:
+      - /app/vehicle
+      - -id
+      - vehicle-2
+      - -startX
+      - "20"
+      - -startY
+      - "10"
+      - -broker
+      - broker:1883
+    depends_on:
+      broker:
+        condition: service_healthy
+    restart: unless-stopped
+  vehicle-3:
+    build: .
+    command:
+      - /app/vehicle
+      - -id
+      - vehicle-3
+      - -startX
+      - "0"
       - -startY
       - "-10"
       - -broker

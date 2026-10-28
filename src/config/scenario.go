@@ -22,6 +22,7 @@ type FaultConfig struct {
 	Action    string `json:"action"`
 	VehicleID string `json:"vehicle_id"`
 	Sequence  int    `json:"sequence"`
+	DelayMS   int    `json:"delay_ms"`
 }
 
 func LoadScenario(path string) (Scenario, error) {
