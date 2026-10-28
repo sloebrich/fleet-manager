@@ -38,6 +38,7 @@ Typical message flow:
 
 - [Go](https://go.dev/dl/) compatible with the version declared in [`go.mod`](go.mod)
 - An MQTT broker, such as [Eclipse Mosquitto](https://mosquitto.org/)
+- [Docker](https://docs.docker.com/get-docker/) with Compose, to serve the web UI (and optionally run the whole system)
 - A modern browser for the UI
 
 The commands below assume the broker is reachable at `localhost:1883`, which is the common local Mosquitto address. If your broker uses another address, configure the application accordingly.
@@ -79,13 +80,21 @@ Start additional vehicle processes in separate terminals if the application conf
 
 ### 3. Open the web UI
 
-From the repository root, start a simple static file server:
+The UI is served by the `web` service in [`docker-compose.yml`](docker-compose.yml), an nginx container serving the contents of `web/`:
 
 ```bash
-python3 -m http.server 8000
+docker compose up -d web
 ```
 
-Then open <http://localhost:8000/web/> in your browser. The UI must be able to reach the controller's HTTP endpoint; adjust the UI or controller configuration if you have changed the endpoint. Keep the static server running in its own terminal.
+Then open <http://localhost:8000> in your browser. The UI polls the controller at `http://localhost:8080/api/state`, so the controller must be running and reachable on port 8080. Stop the UI with `docker compose stop web`.
+
+To run the whole system in containers instead (broker, controller, one vehicle, and the UI), skip steps 1 and 2 and run:
+
+```bash
+docker compose up --build
+```
+
+The UI is then at <http://localhost:8000> and the controller's HTTP API is published on <http://localhost:8080>.
 
 ## Configuration and message flow
 

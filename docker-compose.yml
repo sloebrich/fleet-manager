@@ -9,6 +9,8 @@ services:
       - /app/controller
       - -broker
       - broker:1883
+    ports:
+      - "8080:8080"
     volumes:
       - ./scenarios:/app/scenarios:ro
     depends_on:
@@ -27,4 +29,11 @@ services:
       - broker:1883
     depends_on:
       - broker
+  web:
+    image: nginx:alpine
+    ports:
+      - "8000:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    restart: unless-stopped
 
