@@ -33,5 +33,6 @@
       "vehicle_id": "vehicle-1",
       "sequence": 2
     }
-  ]
+  ],
+  "vehicle_faults": []
 }
