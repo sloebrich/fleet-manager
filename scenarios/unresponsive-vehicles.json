@@ -1,0 +1,303 @@
+{
+  "vehicles": [
+    {
+      "id": "vehicle-1",
+      "start_x": 10,
+      "start_y": -10
+    },
+    {
+      "id": "vehicle-2",
+      "start_x": 20,
+      "start_y": 10
+    },
+    {
+      "id": "vehicle-3",
+      "start_x": 0,
+      "start_y": -10
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-1",
+      "destination": {
+        "x": 10,
+        "y": -4
+      }
+    },
+    {
+      "id": "task-2",
+      "destination": {
+        "x": 0,
+        "y": -4
+      }
+    },
+    {
+      "id": "task-3",
+      "destination": {
+        "x": 10,
+        "y": 4
+      }
+    },
+    {
+      "id": "task-4",
+      "destination": {
+        "x": 0,
+        "y": 4
+      }
+    }
+  ],
+  "controller_faults": [
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 0
+    }
+  ],
+  "vehicle_faults": [
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 2
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 3
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 4
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 5
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 6
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 7
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 8
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 9
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 10
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 11
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 12
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 13
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 14
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 15
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 16
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 17
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 18
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 19
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 20
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 21
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 22
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 23
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 24
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 25
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 26
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 27
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 28
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 29
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 30
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 31
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 32
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 33
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 34
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 35
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 36
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 37
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 38
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 39
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 40
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 41
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 42
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 43
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 44
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 45
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 46
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 47
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 48
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 49
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 50
+    }
+  ]
+}

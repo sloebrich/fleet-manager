@@ -21,35 +21,48 @@
       "id": "task-1",
       "destination": {
         "x": 10,
-        "y": 5
+        "y": 2
       }
     },
     {
       "id": "task-2",
       "destination": {
-        "x": 15,
-        "y": 15
-      }
-    },
-    {
-      "id": "task-3",
-      "destination": {
         "x": 20,
-        "y": 10
+        "y": 0
       }
     }
   ],
-  "controller_faults": [
+  "controller_faults": [],
+  "vehicle_faults": [
     {
       "action": "drop",
       "vehicle_id": "vehicle-1",
-      "sequence": 1
+      "sequence": 3
     },
     {
-      "action": "duplicate",
+      "action": "drop",
       "vehicle_id": "vehicle-1",
-      "sequence": 2
+      "sequence": 4
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 5
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 6
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 7
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 8
     }
-  ],
-  "vehicle_faults": []
+  ]
 }

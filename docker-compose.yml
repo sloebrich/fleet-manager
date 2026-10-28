@@ -33,7 +33,7 @@ services:
       - -broker
       - broker:1883
       - -scenario
-      - ${SCENARIO:-scenarios/scenario.json}
+      - ${SCENARIO:-scenarios/no_faults.json}
     volumes:
       - ./scenarios:/app/scenarios:ro
     depends_on:
@@ -49,7 +49,7 @@ services:
       - -broker
       - broker:1883
       - -scenario
-      - ${SCENARIO:-scenarios/scenario.json}
+      - ${SCENARIO:-scenarios/no_faults.json}
     volumes:
       - ./scenarios:/app/scenarios:ro
     depends_on:
@@ -65,7 +65,7 @@ services:
       - -broker
       - broker:1883
       - -scenario
-      - ${SCENARIO:-scenarios/scenario.json}
+      - ${SCENARIO:-scenarios/no_faults.json}
     volumes:
       - ./scenarios:/app/scenarios:ro
     depends_on:

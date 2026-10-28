@@ -1,0 +1,91 @@
+{
+  "vehicles": [
+    {
+      "id": "vehicle-1",
+      "start_x": 10,
+      "start_y": -10
+    },
+    {
+      "id": "vehicle-2",
+      "start_x": 20,
+      "start_y": 10
+    },
+    {
+      "id": "vehicle-3",
+      "start_x": 0,
+      "start_y": -10
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-1",
+      "destination": {
+        "x": 40,
+        "y": -8
+      }
+    }
+  ],
+  "controller_faults": [],
+  "vehicle_faults": [
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 3
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 4
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 5
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 6
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 7
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-1",
+      "sequence": 8
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 9
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 10
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 11
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 12
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 13
+    },
+    {
+      "action": "drop",
+      "vehicle_id": "vehicle-2",
+      "sequence": 14
+    }
+  ]
+}
