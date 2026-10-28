@@ -1,4 +1,21 @@
 {
+  "vehicles": [
+    {
+      "id": "vehicle-1",
+      "startX": 10,
+      "startY": -10
+    },
+    {
+      "id": "vehicle-2",
+      "startX": 20,
+      "startY": 10
+    },
+    {
+      "id": "vehicle-3",
+      "startX": 0,
+      "startY": -10
+    }
+  ],
   "tasks": [
     {
       "id": "task-1",

@@ -9,9 +9,16 @@ import (
 )
 
 type Scenario struct {
-	Tasks            []TaskConfig  `json:"tasks"`
-	ControllerFaults []FaultConfig `json:"controller_faults"`
-	VehicleFaults    []FaultConfig `json:"vehicle_faults"`
+	Vehicles         []VehicleConfig `json:"vehicles"`
+	Tasks            []TaskConfig    `json:"tasks"`
+	ControllerFaults []FaultConfig   `json:"controller_faults"`
+	VehicleFaults    []FaultConfig   `json:"vehicle_faults"`
+}
+
+type VehicleConfig struct {
+	ID     string `json:"id"`
+	StartX int    `json:"start_x"`
+	StartY int    `json:"start_y"`
 }
 
 type TaskConfig struct {

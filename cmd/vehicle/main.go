@@ -33,12 +33,25 @@ func main() {
 	}
 	defer client.Close()
 
-	v := vehicle.New(*vehicleId, &domain.Position{X: *startX, Y: *startY}, client)
-
 	scenario, err := config.LoadScenario(*scenarioPath)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	startingPosition := &domain.Position{
+		X: *startX,
+		Y: *startY,
+	}
+
+	for _, vConf := range scenario.Vehicles {
+		if vConf.ID == *vehicleId {
+			startingPosition.X = vConf.StartX
+			startingPosition.Y = vConf.StartY
+			break
+		}
+	}
+
+	v := vehicle.New(*vehicleId, startingPosition, client)
 
 	for _, f := range scenario.VehicleFaults {
 		if f.VehicleID != "" && f.VehicleID != *vehicleId {
