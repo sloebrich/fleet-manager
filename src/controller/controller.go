@@ -47,8 +47,8 @@ func New(client *mqtt.Client) *Controller {
 	return controller
 }
 
-func (c *Controller) log(message string) {
-	c.events.Add(message)
+func (c *Controller) log(eventType domain.EventType, message string) {
+	c.events.Add(eventType, message)
 	log.Print(message)
 }
 
@@ -77,11 +77,11 @@ func (c *Controller) HandleHeartbeat(
 	var heartbeat domain.HeartbeatMessage
 
 	if err := json.Unmarshal(message.Payload(), &heartbeat); err != nil {
-		c.log(fmt.Sprintf("invalid heartbeat: %v", err))
+		c.log(domain.EventTypeError, fmt.Sprintf("invalid heartbeat: %v", err))
 		return
 	}
 
-	c.log(fmt.Sprintf("received heartbeat from vehicle %s, sequence=%d", heartbeat.VehicleID, heartbeat.Sequence))
+	c.log(domain.EventTypeHeartbeat, fmt.Sprintf("received heartbeat from vehicle %s, sequence=%d", heartbeat.VehicleID, heartbeat.Sequence))
 	c.heartbeat(heartbeat)
 }
 
@@ -123,7 +123,7 @@ func (c *Controller) heartbeat(
 				task.Status = domain.TaskCompleted
 				vehicle.Status = domain.VehicleIdle
 				vehicle.CurrentTask = ""
-				c.log(fmt.Sprintf("task %s completed by %s", task.ID, vehicle.ID))
+				c.log(domain.EventTypeMessage, fmt.Sprintf("task %s completed by %s", task.ID, vehicle.ID))
 			}
 		}
 
@@ -134,16 +134,16 @@ func (c *Controller) heartbeat(
 
 func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string, payload []byte) error {
 	if c.faultInjector.ShouldDrop(sequence, vehicleID) {
-		c.log(fmt.Sprintf(
-			"FAULT DROP vehicle=%s sequence=%d",
+		c.log(domain.EventTypeMessage, fmt.Sprintf(
+			"FAULT: Dropping message with sequence=%d for vehicle=%s ",
 			vehicleID,
 			sequence,
 		))
 		return nil
 	}
 	if delay := c.faultInjector.ShouldDelay(sequence, vehicleID); delay != nil {
-		c.log(fmt.Sprintf(
-			"FAULT DELAY vehicle=%s sequence=%d",
+		c.log(domain.EventTypeMessage, fmt.Sprintf(
+			"FAULT: Delaying message with sequence=%d for vehicle=%s ",
 			vehicleID,
 			sequence,
 		))
@@ -151,26 +151,26 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 			time.Sleep(*delay)
 			err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
 			if err != nil {
-				c.log(fmt.Sprintf("publish failed: %v", err))
+				c.log(domain.EventTypeError, fmt.Sprintf("publish failed: %v", err))
 			}
 		}()
 		return nil
 	}
 	if c.faultInjector.ShouldDuplicate(sequence, vehicleID) {
-		c.log(fmt.Sprintf(
-			"FAULT DUPLICATE vehicle=%s sequence=%d",
+		c.log(domain.EventTypeMessage, fmt.Sprintf(
+			"FAULT: DUPLICATING message with sequence=%d for vehicle=%s ",
 			vehicleID,
 			sequence,
 		))
 		err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
 		if err != nil {
-			c.log(fmt.Sprintf("publish failed: %v", err))
+			c.log(domain.EventTypeError, fmt.Sprintf("publish failed: %v", err))
 		}
 
 	}
 	err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
 	if err != nil {
-		c.log(fmt.Sprintf("publish failed: %v", err))
+		c.log(domain.EventTypeError, fmt.Sprintf("publish failed: %v", err))
 	}
 	return err
 }
@@ -204,7 +204,7 @@ func (c *Controller) checkVehicles() {
 				assignedTask.Status = domain.TaskQueued
 			}
 
-			c.log(fmt.Sprintf(
+			c.log(domain.EventTypeMessage, fmt.Sprintf(
 				"vehicle offline: %s",
 				vehicle.ID,
 			))
@@ -285,7 +285,7 @@ func (c *Controller) assignTask(task *domain.Task, vehicle *domain.VehicleState)
 
 	err = c.publish(domain.TopicTask, sequence, vehicle.ID, payload)
 
-	c.log(fmt.Sprintf("assigned task=%s to vehicle=%s generation=%d", task.ID, vehicle.ID, task.AssignmentGeneration))
+	c.log(domain.EventTypeMessage, fmt.Sprintf("assigned task=%s to vehicle=%s generation=%d", task.ID, vehicle.ID, task.AssignmentGeneration))
 	return err
 }
 
@@ -303,7 +303,7 @@ func (c *Controller) stopVehicle(vehicleId string, reason string) error {
 	}
 
 	err = c.publish(domain.TopicStop, sequence, vehicleId, payload)
-	c.log(fmt.Sprintf("stopped vehicle=%s reason=%s sequence=%d", vehicleId, reason, sequence))
+	c.log(domain.EventTypeMessage, fmt.Sprintf("stopped vehicle=%s reason=%s sequence=%d", vehicleId, reason, sequence))
 
 	return err
 }

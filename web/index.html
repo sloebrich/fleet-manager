@@ -15,7 +15,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
         }
 
@@ -83,6 +83,128 @@
             width: 100%;
             white-space: normal;
         }
+
+        /* ---------- Layout: grid and log side by side ---------- */
+
+        .main-row {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .main-row canvas {
+            flex: none;
+            margin: 0;
+        }
+
+        .main-row .card {
+            align-self: stretch;
+            margin: 0;
+        }
+
+        /* Wide enough for the 600px grid, a gap and a usable log. */
+        @media (min-width: 1141px) {
+            .main-row {
+                flex-direction: row;
+                align-items: flex-start;
+                gap: 20px;
+            }
+
+            .main-row .card {
+                align-self: auto;
+            }
+
+            .log-card {
+                box-sizing: border-box;
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                height: 602px; /* same as the grid: 600px + 1px border per side */
+            }
+
+            .log-card .ev-toggle {
+                align-self: flex-start;
+            }
+
+            .log-card .ev-scroll {
+                flex: 1 1 auto;
+                min-height: 0;
+                max-height: none;
+            }
+        }
+
+        /* ---------- Event log ---------- */
+
+        .ev-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .ev-live {
+            color: #777;
+        }
+
+        .ev-note {
+            margin: 0 0 10px;
+            line-height: 1.5;
+            color: #777;
+        }
+
+        .ev-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 10px;
+            color: #aaa;
+            cursor: pointer;
+        }
+
+        .ev-toggle input {
+            margin: 0;
+            accent-color: #888;
+        }
+
+        .ev-scroll {
+            max-height: 320px;
+            overflow-y: auto;
+            padding-top: 8px;
+            border-top: 1px solid #2d2d2d;
+            scrollbar-width: thin;
+            scrollbar-color: #3a3a3a transparent;
+        }
+
+        .ev-scroll td.grow {
+            overflow-wrap: anywhere;
+        }
+
+        .ev-time {
+            color: #777;
+        }
+
+        .ev-empty {
+            padding: 12px 0;
+            color: #666;
+        }
+
+        /* Narrow screens: time and kind on one line, message below. */
+        @media (max-width: 560px) {
+            .ev-scroll tr {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                padding-bottom: 6px;
+            }
+
+            .ev-scroll td.grow,
+            .ev-scroll td.ev-empty {
+                grid-column: 1 / -1;
+            }
+        }
+
     </style>
 </head>
 
@@ -96,7 +218,29 @@
         Connecting to Controller...
     </div>
 
-    <canvas id="factory-floor" width="600" height="600"></canvas>
+    <div class="main-row">
+
+        <canvas id="factory-floor" width="600" height="600"></canvas>
+
+        <section class="card log-card" aria-label="Event log">
+            <div class="ev-head">
+                <strong class="section-header">Event log</strong>
+                <span class="ev-live" id="ev-live">connecting&hellip;</span>
+            </div>
+            <div class="ev-note">
+                Messages the controller receives and sends, plus the faults it injects.
+                Faults injected by the vehicles show up only as gaps in the heartbeat
+                sequence numbers.
+            </div>
+            <label class="ev-toggle">
+                <input type="checkbox" id="ev-heartbeats" checked> Show heartbeats
+            </label>
+            <div class="ev-scroll" id="ev-scroll">
+                <table class="fleet-table"><tbody id="ev-list"></tbody></table>
+            </div>
+        </section>
+
+    </div>
 
 </div>
 
@@ -342,6 +486,137 @@
     setInterval(fetchFleetState, 200);
 
     fetchFleetState();
+
+    // ---------------------------------------------------------------
+    // Event log: what the controller receives and sends, plus the
+    // faults it injects. Each event from /api/events has a type
+    // (HEARTBEAT, MESSAGE or ERROR); colours reuse the table classes.
+    // ---------------------------------------------------------------
+    const EVENT_TYPE_CLASS = {
+        HEARTBEAT: "task-queued",
+        MESSAGE: "",
+        ERROR: "status-offline",
+    };
+
+    const MAX_EVENT_ROWS = 300;
+
+    const evScrollEl = document.getElementById("ev-scroll");
+    const evListEl = document.getElementById("ev-list");
+    const evHeartbeatsEl = document.getElementById("ev-heartbeats");
+    const evLiveEl = document.getElementById("ev-live");
+
+    let allEvents = [];
+    let eventsT0 = null;        // time of the first event, for "+12.4s"
+    let newestEventId = 0;
+    let eventsKey = "";
+
+    function escapeHtml(text) {
+        return text.replace(/[&<>"']/g, ch => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[ch]));
+    }
+
+    function formatClock(date) {
+        return date.toLocaleTimeString("en-GB") + "." +
+            String(date.getMilliseconds()).padStart(3, "0");
+    }
+
+    function renderEvents() {
+        const visible = evHeartbeatsEl.checked
+            ? allEvents
+            : allEvents.filter(event => event.type !== "HEARTBEAT");
+
+        const previousTop = evScrollEl.scrollTop;
+        const previousHeight = evScrollEl.scrollHeight;
+
+        if (visible.length === 0) {
+            evListEl.innerHTML = `<tr><td class="ev-empty" colspan="3">${
+                allEvents.length === 0
+                    ? "Waiting for events&hellip;"
+                    : "Only heartbeats so far &mdash; tick &ldquo;Show heartbeats&rdquo; to see them."
+            }</td></tr>`;
+        } else {
+            // Newest first.
+            evListEl.innerHTML = visible
+                .slice(-MAX_EVENT_ROWS)
+                .reverse()
+                .map(event => {
+                    const time = new Date(event.time);
+                    const elapsed = Math.max(0, (time - eventsT0) / 1000);
+
+                    return `
+                        <tr title="${formatClock(time)}">
+                            <td class="ev-time">+${elapsed.toFixed(1)}s</td>
+                            <td><span class="${EVENT_TYPE_CLASS[event.type] || ""}">${escapeHtml(event.type)}</span></td>
+                            <td class="grow">${escapeHtml(event.message)}</td>
+                        </tr>
+                    `;
+                })
+                .join("");
+        }
+
+        // Keep the reader's place when new rows appear above.
+        if (previousTop > 0) {
+            evScrollEl.scrollTop =
+                previousTop + (evScrollEl.scrollHeight - previousHeight);
+        }
+    }
+
+    function ingestEvents(events) {
+        const first = events.length ? events[0].id : 0;
+        const newest = events.length ? events[events.length - 1].id : 0;
+        const key = `${first}:${newest}:${events.length}`;
+
+        if (key === eventsKey) {
+            return;
+        }
+        eventsKey = key;
+
+        // The controller restarted: ids start over, so the log does too.
+        if (newest < newestEventId) {
+            eventsT0 = null;
+        }
+
+        if (events.length && (eventsT0 === null || first === 1)) {
+            eventsT0 = Date.parse(events[0].time);
+        }
+
+        newestEventId = newest;
+        allEvents = events.map(event => ({ ...event, type: event.type || "MESSAGE" }));
+
+        renderEvents();
+    }
+
+    function setEventsLive(ok) {
+        evLiveEl.textContent = ok ? "live" : "controller unreachable";
+        evLiveEl.className = ok ? "ev-live" : "ev-live status-offline";
+    }
+
+    async function fetchEvents() {
+        try {
+            const response = await fetch("http://localhost:8080/api/events");
+
+            if (!response.ok) {
+                throw new Error("Controller returned " + response.status);
+            }
+
+            const data = await response.json();
+
+            setEventsLive(true);
+            ingestEvents(data.events || []);
+        } catch (err) {
+            setEventsLive(false);
+        }
+    }
+
+    evHeartbeatsEl.addEventListener("change", () => {
+        renderEvents();
+        evScrollEl.scrollTop = 0;
+    });
+
+    setInterval(fetchEvents, 500);
+
+    fetchEvents();
 </script>
 
 </body>

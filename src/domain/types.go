@@ -68,8 +68,17 @@ type StopMessage struct {
 	Sequence int    `json:"sequence"`
 }
 
+type EventType string
+
+const (
+	EventTypeHeartbeat EventType = "HEARTBEAT"
+	EventTypeError     EventType = "ERROR"
+	EventTypeMessage   EventType = "MESSAGE"
+)
+
 type Event struct {
 	ID      int       `json:"id"`
 	Time    time.Time `json:"time"`
+	Type    EventType `json:"type"`
 	Message string    `json:"message"`
 }

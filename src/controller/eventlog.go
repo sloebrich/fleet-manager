@@ -20,7 +20,7 @@ func newEventLog(max int) *eventLog {
 	}
 }
 
-func (l *eventLog) Add(message string) {
+func (l *eventLog) Add(eventType domain.EventType, message string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -28,6 +28,7 @@ func (l *eventLog) Add(message string) {
 	l.events = append(l.events, domain.Event{
 		ID:      l.nextID,
 		Time:    time.Now(),
+		Type:    eventType,
 		Message: message,
 	})
 
