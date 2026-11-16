@@ -28,6 +28,7 @@ func main() {
 	controller := controller.New(client)
 
 	http.HandleFunc("/api/state", controller.HandleState)
+	http.HandleFunc("/api/events", controller.HandleEvents)
 
 	go func() {
 		log.Println("HTTP server listening on :8080")

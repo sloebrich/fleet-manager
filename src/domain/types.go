@@ -67,3 +67,9 @@ type StopMessage struct {
 	Reason   string `json:"reason"`
 	Sequence int    `json:"sequence"`
 }
+
+type Event struct {
+	ID      int       `json:"id"`
+	Time    time.Time `json:"time"`
+	Message string    `json:"message"`
+}
