@@ -295,8 +295,6 @@
         const targetX = originX + task.destination.x * scale;
         const targetY = originY - task.destination.y * scale;
 
-        const color = colorForVehicle(vehicle.id);
-
         // Line from vehicle to destination
         ctx.beginPath();
         ctx.strokeStyle = colorForVehicle(vehicle.id, 0.3);
@@ -305,7 +303,11 @@
         ctx.lineTo(targetX, targetY);
         ctx.stroke();
 
-        // Destination marker
+        drawGoalMarker(targetX, targetY, colorForVehicle(vehicle.id));
+    }
+
+    // The X that marks where a task has to go.
+    function drawGoalMarker(targetX, targetY, color) {
         const size = 8;
 
         ctx.strokeStyle = color;
@@ -320,6 +322,34 @@
         ctx.moveTo(targetX + size, targetY - size);
         ctx.lineTo(targetX - size, targetY + size);
         ctx.stroke();
+    }
+
+    const UNASSIGNED_GOAL_COLOR = "rgba(190, 190, 190, 0.75)";
+
+    // Marks a task's goal whether or not a vehicle is on its way: grey while
+    // the task is waiting in the queue, in the assigned vehicle's colour
+    // while it is being worked on. The label is the task id.
+    function drawTaskGoal(task, vehicles) {
+        const targetX = originX + task.destination.x * scale;
+        const targetY = originY - task.destination.y * scale;
+
+        const assigned = task.status === "IN_PROGRESS"
+            ? vehicles[task.assignedVehicle]
+            : null;
+        const color = assigned ? colorForVehicle(assigned.id) : UNASSIGNED_GOAL_COLOR;
+
+        drawGoalMarker(targetX, targetY, color);
+
+        ctx.fillStyle = color;
+        ctx.font = "10px monospace";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+
+        // Keep the label on the canvas for goals near the right edge.
+        const labelWidth = ctx.measureText(task.id).width;
+        const labelX = Math.min(targetX + 11, canvas.width - labelWidth - 2);
+
+        ctx.fillText(task.id, labelX, targetY - 11);
     }
 
     // ---------------------------------------------------------------
@@ -455,7 +485,14 @@
 
         const vehicleList = Object.values(latestState.vehicles);
 
-        // Draw task routes first so vehicles appear on top.
+        // Goals of every task that is still open, assigned or not.
+        Object.values(latestState.tasks).forEach(task => {
+            if (task.status !== "COMPLETED") {
+                drawTaskGoal(task, latestState.vehicles);
+            }
+        });
+
+        // Draw task routes next so vehicles appear on top.
         vehicleList.forEach(vehicle => {
             const task = taskForVehicle(vehicle, latestState.tasks);
 
