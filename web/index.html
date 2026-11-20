@@ -125,10 +125,6 @@
                 height: 602px; /* same as the grid: 600px + 1px border per side */
             }
 
-            .log-card .ev-toggle {
-                align-self: flex-start;
-            }
-
             .log-card .ev-scroll {
                 flex: 1 1 auto;
                 min-height: 0;
@@ -153,20 +149,6 @@
             margin: 0 0 10px;
             line-height: 1.5;
             color: #777;
-        }
-
-        .ev-toggle {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            margin-bottom: 10px;
-            color: #aaa;
-            cursor: pointer;
-        }
-
-        .ev-toggle input {
-            margin: 0;
-            accent-color: #888;
         }
 
         .ev-scroll {
@@ -229,12 +211,11 @@
             </div>
             <div class="ev-note">
                 Messages the controller receives and sends, plus the faults it injects.
-                Faults injected by the vehicles show up only as gaps in the heartbeat
-                sequence numbers.
+                Heartbeats are shown on the grid instead: the number on a vehicle is its
+                last heartbeat sequence, a ring means one just arrived, and a red &#10005;
+                means the vehicle is offline. Faults injected by the vehicles show up
+                only as gaps in the sequence numbers.
             </div>
-            <label class="ev-toggle">
-                <input type="checkbox" id="ev-heartbeats" checked> Show heartbeats
-            </label>
             <div class="ev-scroll" id="ev-scroll">
                 <table class="fleet-table"><tbody id="ev-list"></tbody></table>
             </div>
@@ -341,31 +322,151 @@
         ctx.stroke();
     }
 
-    function drawVehicle(vehicle) {
+    // ---------------------------------------------------------------
+    // Heartbeat pulse. The controller refreshes lastHeartbeat on every
+    // heartbeat it receives, so a changed value means "one just arrived".
+    // ---------------------------------------------------------------
+    const PULSE_MS = 800;
+    const BODY_RADIUS = 14;
+    const PULSE_RADIUS = 36;
+
+    const beatState = {};  // vehicle id -> { lastHeartbeat, pulseStart }
+
+    function trackHeartbeat(vehicle) {
+        const seen = beatState[vehicle.id];
+
+        if (!seen) {
+            // First sighting: remember it, but do not pulse.
+            beatState[vehicle.id] = {
+                lastHeartbeat: vehicle.lastHeartbeat,
+                pulseStart: -Infinity,
+            };
+        } else if (seen.lastHeartbeat !== vehicle.lastHeartbeat) {
+            seen.lastHeartbeat = vehicle.lastHeartbeat;
+            seen.pulseStart = performance.now();
+        }
+    }
+
+    // 0 right after a heartbeat, rising to 1 when the pulse is over.
+    function pulseProgress(vehicle, now) {
+        const seen = beatState[vehicle.id];
+
+        if (!seen) {
+            return 1;
+        }
+
+        return Math.min(1, (now - seen.pulseStart) / PULSE_MS);
+    }
+
+    function drawOfflineMarker(screenX, screenY) {
+        const size = 10;
+
+        // Dark underlay keeps the red readable on any background.
+        [["#121212", 6], ["#ff3333", 3]].forEach(([strokeColor, width]) => {
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = width;
+            ctx.lineCap = "round";
+
+            ctx.beginPath();
+            ctx.moveTo(screenX - size, screenY - size);
+            ctx.lineTo(screenX + size, screenY + size);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(screenX + size, screenY - size);
+            ctx.lineTo(screenX - size, screenY + size);
+            ctx.stroke();
+        });
+
+        ctx.lineCap = "butt";
+    }
+
+    function drawVehicle(vehicle, now) {
         const screenX = originX + vehicle.position.x * scale;
         const screenY = originY - vehicle.position.y * scale;
 
-        const color = colorForVehicle(vehicle.id);
+        const offline = vehicle.status === "OFFLINE";
+        const progress = pulseProgress(vehicle, now);
 
-        // Vehicle
+        // Pulse ring: expands and fades after each heartbeat.
+        // An offline vehicle sends none, so it never pulses.
+        if (!offline && progress < 1) {
+            const eased = 1 - Math.pow(1 - progress, 2);
+
+            ctx.beginPath();
+            ctx.arc(
+                screenX,
+                screenY,
+                BODY_RADIUS + (PULSE_RADIUS - BODY_RADIUS) * eased,
+                0,
+                2 * Math.PI
+            );
+            ctx.strokeStyle = colorForVehicle(vehicle.id, 0.7 * (1 - progress));
+            ctx.lineWidth = 3 - 2 * progress;
+            ctx.stroke();
+        }
+
+        // Body, with a short throb on each heartbeat. An offline vehicle is
+        // grey: the vehicle colour may itself be red, which would hide the X.
+        const radius = offline ? BODY_RADIUS : BODY_RADIUS + 2 * (1 - progress);
+
         ctx.beginPath();
-        ctx.arc(screenX, screenY, 14, 0, 2 * Math.PI);
+        ctx.arc(screenX, screenY, radius, 0, 2 * Math.PI);
 
-        ctx.fillStyle = color;
+        ctx.fillStyle = offline ? "rgba(120, 120, 120, 0.4)" : colorForVehicle(vehicle.id);
         ctx.fill();
 
-        ctx.strokeStyle = "#fff";
+        ctx.strokeStyle = offline ? "rgba(255, 255, 255, 0.4)" : "#fff";
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
+        // Beat counter: the last heartbeat sequence the controller accepted.
+        // A jump (5 -> 8) means heartbeats were lost on the way.
+        const counter = String(vehicle.lastSequence);
+
+        ctx.fillStyle = offline ? "rgba(255, 255, 255, 0.45)" : "#111";
+        ctx.font = (counter.length > 3 ? "9px" : "11px") + " monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(counter, screenX, screenY + 0.5);
+
         // ID
-        ctx.fillStyle = "#fff";
+        ctx.fillStyle = offline ? "rgba(255, 255, 255, 0.5)" : "#fff";
         ctx.font = "12px monospace";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
         ctx.fillText(
             vehicle.id,
             screenX - 20,
             screenY - 22
         );
+
+        if (offline) {
+            drawOfflineMarker(screenX, screenY);
+        }
+    }
+
+    // The canvas is redrawn every animation frame from the latest polled
+    // state, so pulses animate smoothly even though state arrives at 5 Hz.
+    let latestState = { vehicles: {}, tasks: {} };
+
+    function render(now) {
+        drawGrid();
+
+        const vehicleList = Object.values(latestState.vehicles);
+
+        // Draw task routes first so vehicles appear on top.
+        vehicleList.forEach(vehicle => {
+            const task = taskForVehicle(vehicle, latestState.tasks);
+
+            if (task && task.status === "IN_PROGRESS") {
+                drawTaskLine(vehicle, task);
+            }
+        });
+
+        vehicleList.forEach(vehicle => drawVehicle(vehicle, now));
+
+        requestAnimationFrame(render);
     }
 
     function taskForVehicle(vehicle, tasks) {
@@ -428,24 +529,15 @@
 
             const state = await response.json();
 
-            drawGrid();
-
             const vehicles = state.vehicles || {};
             const tasks = state.tasks || {};
 
             const vehicleList = Object.values(vehicles);
             const taskList = Object.values(tasks);
 
-            // Draw task routes first so vehicles appear on top.
-            vehicleList.forEach(vehicle => {
-                const task = taskForVehicle(vehicle, tasks);
-
-                if (task && task.status === "IN_PROGRESS") {
-                    drawTaskLine(vehicle, task);
-                }
-            });
-
-            vehicleList.forEach(vehicle => drawVehicle(vehicle));
+            // The canvas is drawn by render(); just hand it the new state.
+            vehicleList.forEach(trackHeartbeat);
+            latestState = { vehicles, tasks };
 
             let html = "<strong class=\"section-header\">Vehicles</strong>";
 
@@ -486,14 +578,15 @@
     setInterval(fetchFleetState, 200);
 
     fetchFleetState();
+    requestAnimationFrame(render);
 
     // ---------------------------------------------------------------
     // Event log: what the controller receives and sends, plus the
     // faults it injects. Each event from /api/events has a type
     // (HEARTBEAT, MESSAGE or ERROR); colours reuse the table classes.
+    // Heartbeats are not listed: the grid shows them instead.
     // ---------------------------------------------------------------
     const EVENT_TYPE_CLASS = {
-        HEARTBEAT: "task-queued",
         MESSAGE: "",
         ERROR: "status-offline",
     };
@@ -502,7 +595,6 @@
 
     const evScrollEl = document.getElementById("ev-scroll");
     const evListEl = document.getElementById("ev-list");
-    const evHeartbeatsEl = document.getElementById("ev-heartbeats");
     const evLiveEl = document.getElementById("ev-live");
 
     let allEvents = [];
@@ -522,22 +614,15 @@
     }
 
     function renderEvents() {
-        const visible = evHeartbeatsEl.checked
-            ? allEvents
-            : allEvents.filter(event => event.type !== "HEARTBEAT");
-
         const previousTop = evScrollEl.scrollTop;
         const previousHeight = evScrollEl.scrollHeight;
 
-        if (visible.length === 0) {
-            evListEl.innerHTML = `<tr><td class="ev-empty" colspan="3">${
-                allEvents.length === 0
-                    ? "Waiting for events&hellip;"
-                    : "Only heartbeats so far &mdash; tick &ldquo;Show heartbeats&rdquo; to see them."
-            }</td></tr>`;
+        if (allEvents.length === 0) {
+            evListEl.innerHTML =
+                `<tr><td class="ev-empty" colspan="3">Waiting for events&hellip;</td></tr>`;
         } else {
             // Newest first.
-            evListEl.innerHTML = visible
+            evListEl.innerHTML = allEvents
                 .slice(-MAX_EVENT_ROWS)
                 .reverse()
                 .map(event => {
@@ -582,7 +667,9 @@
         }
 
         newestEventId = newest;
-        allEvents = events.map(event => ({ ...event, type: event.type || "MESSAGE" }));
+        allEvents = events
+            .filter(event => event.type !== "HEARTBEAT")
+            .map(event => ({ ...event, type: event.type || "MESSAGE" }));
 
         renderEvents();
     }
@@ -608,11 +695,6 @@
             setEventsLive(false);
         }
     }
-
-    evHeartbeatsEl.addEventListener("change", () => {
-        renderEvents();
-        evScrollEl.scrollTop = 0;
-    });
 
     setInterval(fetchEvents, 500);
 
