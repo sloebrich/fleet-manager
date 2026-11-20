@@ -145,27 +145,36 @@ func (c *Controller) heartbeat(
 	}
 
 	if req.Sequence > vehicle.LastSequence {
+		moved := vehicle.LastSequence > 0 && vehicle.Position != req.Position
+
 		vehicle.Position = domain.Position{X: req.Position.X, Y: req.Position.Y}
 		vehicle.LastSequence = req.Sequence
 
-		if task, ok := c.tasks[vehicle.CurrentTask]; ok && task.Status == domain.TaskInProgress {
-			if req.CurrentTask != vehicle.CurrentTask {
-				task.Status = domain.TaskQueued
-				task.AssignedVehicle = ""
-				if req.CurrentTask != "" {
-					c.stopVehicle(req.VehicleID, fmt.Sprintf("Vehicle was executing task %s, but task %s assigned in the controller ", req.CurrentTask, vehicle.CurrentTask))
-				}
-				vehicle.CurrentTask = ""
-				vehicle.Status = domain.VehicleIdle
+		task, ok := c.tasks[vehicle.CurrentTask]
+		owned := ok && task.AssignedVehicle == vehicle.ID && task.Status == domain.TaskInProgress
 
-			} else if vehicle.Position.X == task.Destination.X && vehicle.Position.Y == task.Destination.Y {
-				task.Status = domain.TaskCompleted
-				vehicle.Status = domain.VehicleIdle
-				vehicle.CurrentTask = ""
-				c.log(domain.EventTypeMessage, fmt.Sprintf("task %s completed by %s", task.ID, vehicle.ID))
+		switch {
+		case !owned:
+			vehicle.CurrentTask = ""
+			vehicle.Status = domain.VehicleIdle
+			if moved {
+				c.stopVehicle(req.VehicleID, fmt.Sprintf("vehicle %s reports task %s but has no task assigned in the controller", req.VehicleID, req.CurrentTask))
 			}
-		}
+		case req.CurrentTask != task.ID:
+			task.Status = domain.TaskQueued
+			task.AssignedVehicle = ""
+			if req.CurrentTask != "" {
+				c.stopVehicle(req.VehicleID, fmt.Sprintf("Vehicle was executing task %s, but task %s assigned in the controller ", req.CurrentTask, vehicle.CurrentTask))
+			}
+			vehicle.CurrentTask = ""
+			vehicle.Status = domain.VehicleIdle
 
+		case vehicle.Position == task.Destination:
+			task.Status = domain.TaskCompleted
+			vehicle.Status = domain.VehicleIdle
+			vehicle.CurrentTask = ""
+			c.log(domain.EventTypeMessage, fmt.Sprintf("task %s completed by %s", task.ID, vehicle.ID))
+		}
 	}
 
 	vehicle.LastHeartbeat = time.Now()
@@ -239,7 +248,7 @@ func (c *Controller) checkVehicles() {
 			vehicle.Status = domain.VehicleOffline
 
 			assignedTask, ok := c.tasks[vehicle.CurrentTask]
-			if ok {
+			if ok && assignedTask.AssignedVehicle == vehicle.ID && assignedTask.Status == domain.TaskInProgress {
 				assignedTask.AssignedVehicle = ""
 				assignedTask.Status = domain.TaskQueued
 			}
