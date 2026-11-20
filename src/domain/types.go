@@ -8,6 +8,7 @@ const (
 	TopicHeartbeat Topic = "heartbeat"
 	TopicTask      Topic = "task"
 	TopicStop      Topic = "stop"
+	TopicStart     Topic = "start"
 )
 
 type Position struct {

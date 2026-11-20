@@ -28,8 +28,12 @@ func New(clientID string, brokerURL string) (*Client, error) {
 
 }
 
-func (c *Client) Publish(topic string, payload any) error {
-	token := c.client.Publish(topic, 1, false, payload)
+func (c *Client) Publish(topic string, payload any, retained ...bool) error {
+	publishRetained := false
+	if len(retained) > 0 {
+		publishRetained = retained[0]
+	}
+	token := c.client.Publish(topic, 1, publishRetained, payload)
 
 	if token.Wait() && token.Error() != nil {
 		return token.Error()

@@ -83,5 +83,9 @@ func main() {
 		)
 	}
 
+	for _, v := range scenario.Vehicles {
+		controller.VehiclesReady[v.ID] = false
+	}
+
 	select {}
 }

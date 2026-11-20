@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"fleet-manager/src/fault"
 	mqtt "fleet-manager/src/mqtt"
 	"fleet-manager/src/vehicle"
+
+	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
 func main() {
@@ -88,5 +91,24 @@ func main() {
 		log.Fatal(err)
 	}
 
+	log.Print("waiting for start signal")
+	controllerStarted := make(chan struct{})
+	err = client.Subscribe(string(domain.TopicStart), func(client paho.Client, message paho.Message) {
+		log.Print("received start from controller, starting vehicle")
+		controllerStarted <- struct{}{}
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Print("Sending first heartbeat")
+	msg := domain.HeartbeatMessage{VehicleID: *vehicleId, Sequence: 0}
+	payload, err := json.Marshal(&msg)
+	err = client.Publish(fmt.Sprintf("%s/%s", domain.TopicHeartbeat, *vehicleId), payload)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	<-controllerStarted
 	v.Run()
 }

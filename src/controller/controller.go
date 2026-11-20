@@ -28,7 +28,8 @@ type Controller struct {
 
 	faultInjector *fault.Injector
 
-	events *eventLog
+	events        *eventLog
+	VehiclesReady map[string]bool
 }
 
 func New(client *mqtt.Client) *Controller {
@@ -39,6 +40,7 @@ func New(client *mqtt.Client) *Controller {
 		nextSequence:  make(map[string]int),
 		faultInjector: fault.New(),
 		events:        newEventLog(500),
+		VehiclesReady: make(map[string]bool),
 	}
 
 	go controller.failureDetector()
@@ -82,7 +84,27 @@ func (c *Controller) HandleHeartbeat(
 	}
 
 	c.log(domain.EventTypeHeartbeat, fmt.Sprintf("received heartbeat from vehicle %s, sequence=%d", heartbeat.VehicleID, heartbeat.Sequence))
-	c.heartbeat(heartbeat)
+
+	if heartbeat.Sequence == 0 {
+		c.mu.Lock()
+		c.VehiclesReady[heartbeat.VehicleID] = true
+		defer c.mu.Unlock()
+
+		for _, ready := range c.VehiclesReady {
+			if !ready {
+				return
+			}
+		}
+
+		log.Print("All vehicles started")
+		payload, err := json.Marshal(struct{}{})
+		err = c.client.Publish(string(domain.TopicStart), payload, true)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		c.heartbeat(heartbeat)
+	}
 }
 
 func (c *Controller) heartbeat(
@@ -135,7 +157,7 @@ func (c *Controller) heartbeat(
 func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string, payload []byte) error {
 	if c.faultInjector.ShouldDrop(sequence, vehicleID) {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: Dropping message with sequence=%d for vehicle=%s ",
+			"FAULT: Dropping message for vehicle=%s with sequence=%d ",
 			vehicleID,
 			sequence,
 		))
@@ -143,7 +165,7 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 	}
 	if delay := c.faultInjector.ShouldDelay(sequence, vehicleID); delay != nil {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: Delaying message with sequence=%d for vehicle=%s ",
+			"FAULT: Delaying message for vehicle=%s with sequence=%d ",
 			vehicleID,
 			sequence,
 		))
@@ -158,7 +180,7 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 	}
 	if c.faultInjector.ShouldDuplicate(sequence, vehicleID) {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: DUPLICATING message with sequence=%d for vehicle=%s ",
+			"FAULT: DUPLICATING message for vehicle=%s with sequence=%d ",
 			vehicleID,
 			sequence,
 		))

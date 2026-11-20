@@ -8,6 +8,8 @@ services:
       interval: 2s
       timeout: 5s
       retries: 10
+    ports:
+      - "1883:1883"
   controller:
     build: .
     command:
@@ -39,6 +41,8 @@ services:
     depends_on:
       broker:
         condition: service_healthy
+      controller: 
+        condition: service_started
     restart: unless-stopped
   vehicle-2:
     build: .
@@ -55,6 +59,8 @@ services:
     depends_on:
       broker:
         condition: service_healthy
+      controller: 
+        condition: service_started
     restart: unless-stopped
   vehicle-3:
     build: .
@@ -71,6 +77,8 @@ services:
     depends_on:
       broker:
         condition: service_healthy
+      controller: 
+        condition: service_started
     restart: unless-stopped
   web:
     image: nginx:alpine
