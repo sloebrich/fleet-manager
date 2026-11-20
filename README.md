@@ -12,7 +12,7 @@ Vehicles and the controller communicate through an MQTT broker. A browser UI vis
 - Synchronised startup: vehicles register first and wait for a start signal from the controller
 - Task assignment and reassignment
 - Heartbeat-based failure detection
-- Reconciliation of vehicles that report a task they no longer own: the controller stops them
+- Reconciliation of stale vehicles: the controller stops a vehicle that moves without a task assigned to it
 - Message fault injection: drop, delay, duplicate, and reorder
 - Controller state persistence and recovery
 - Browser-based fleet visualization with a live controller event log
@@ -33,7 +33,7 @@ Typical message flow:
 
 - At startup, every vehicle publishes a registration heartbeat (sequence 0) and waits. The controller knows the vehicles from the scenario file and starts them all together: once every listed vehicle has registered, it publishes a retained `start` message.
 - After the start signal, vehicles publish a heartbeat every second, including their current position, the task they are executing, and a sequence number.
-- The controller consumes heartbeats, updates its state, and detects task completion or vehicle timeouts. A vehicle that reports a task the controller has given to someone else is told to stop.
+- The controller consumes heartbeats, updates its state, and detects task completion or vehicle timeouts. A vehicle that moves without a task assigned to it is told to stop.
 - The controller publishes task assignments and stop commands on vehicle-specific topics.
 - The UI polls the controller's HTTP API for the current simulation state and for the controller's event log.
 
@@ -72,7 +72,9 @@ To pin a scenario, put `SCENARIO=scenarios/<file>.json` in a `.env` file next to
 
 Without Docker, pass `-scenario scenarios/<file>.json` to the controller and to every vehicle.
 
-Startup order does not matter. The controller registers the vehicles listed in the scenario as `NOT_READY`, and each vehicle announces itself with a heartbeat that has sequence 0 and then waits. When every listed vehicle has announced itself, the controller publishes a retained `start` message and all vehicles begin moving at the same moment. The broker retains that message, so a vehicle that is restarted later starts immediately. Faults only apply from the first real heartbeat (sequence 1) on; the registration heartbeat is never dropped or delayed. This is what makes a scenario play out the same way on every run, and all times below are measured from the start signal.
+Startup order does not matter. The controller registers the vehicles listed in the scenario as `NOT_READY`, and each vehicle announces itself with a heartbeat that has sequence 0 and then waits. When every listed vehicle has announced itself, the controller publishes a retained `start` message and all vehicles begin moving at about the same moment. The registration heartbeat is never dropped or delayed; faults apply from heartbeat 1 on. This is what makes a scenario play out the same way on every run, and all times below are measured from the start signal.
+
+The broker keeps the `start` message for as long as it runs. A vehicle that connects to a broker left over from an earlier run starts at once, before the controller has registered the whole fleet. That is one more reason to run `docker compose down` between scenarios, which also removes the broker.
 
 ### Scenario file format
 
@@ -113,38 +115,46 @@ Timing to keep in mind when reading a scenario:
 - A vehicle moves one cell per second, first along x, then along y, and sends a heartbeat every second. Heartbeat *N* leaves about *N* − 1 seconds after the start signal.
 - The controller marks a vehicle `OFFLINE` after more than 3 seconds without a heartbeat and puts its task back in the queue, provided that task is still assigned to that vehicle.
 - The controller assigns queued tasks to the nearest idle vehicle every 0.5 seconds.
-- A vehicle that sends a heartbeat while the controller has no task assigned to it, and that has moved since its previous heartbeat, is told to stop. The same happens when a vehicle reports a different task than the one the controller has given it.
+- If a heartbeat does not carry the task the controller assigned, the controller assumes the assignment was lost and puts the task back in the queue. If the heartbeat names a different task, the vehicle is also told to stop.
+- If the controller has no task assigned to a vehicle and the vehicle has moved since its last accepted heartbeat, the vehicle is told to stop. This is how a revived vehicle that kept working on a reassigned task, or one that received an obsolete assignment, is brought under control.
 
 ### Reading the web UI
 
 The UI shows the controller's view, not the vehicles' real state.
 
-- The **Vehicles** table lists each vehicle's last reported position, its status (`IDLE`, `WORKING`, or a red `OFFLINE`), and the task the controller thinks it has.
+- The **Vehicles** table lists each vehicle's last reported position, its status (`NOT_READY`, `IDLE`, `WORKING`, or a red `OFFLINE`), and the task the controller thinks it has. `NOT_READY` means the scenario lists the vehicle but it has not registered yet. If one vehicle stays `NOT_READY`, the fleet never starts.
 - The **Tasks** table lists each task's status (`QUEUED`, `IN_PROGRESS`, `COMPLETED`) and the vehicle it is assigned to.
 - On the grid, every vehicle is a coloured circle. While the controller thinks a vehicle is working on an in-progress task, a line leads from the vehicle to the task's ✕.
 - Every task that is not completed has a ✕ at its goal, labelled with the task id. It is grey while the task is `QUEUED` and takes the assigned vehicle's colour while the task is `IN_PROGRESS`. A completed task's ✕ disappears.
 - The number inside a vehicle is the last heartbeat sequence the controller accepted. A jump, such as 5 to 8, means heartbeats were lost on the way.
 - A ring pulses out from a vehicle each time the controller receives a heartbeat from it. A duplicated or late heartbeat also pulses, but does not change the number.
 - A grey circle with a red ✕ means the controller has marked the vehicle `OFFLINE`. It clears with the next heartbeat.
-- The event log does not list heartbeats, because the grid already shows them.
+- The **Event log** sits next to the grid, or below it on a narrow screen, and lists the newest event first. It shows what the controller does: each assignment with its generation, each stop command with the reason, vehicles it marks offline, completed tasks with the vehicle that completed them, errors, and the faults it injects into its own messages. The time on the left (`+12.4s`) counts from the first message the controller received. Hover over a row for the wall-clock time.
+- The event log does not list heartbeats, because the grid already shows them. Faults injected on the vehicle side are not logged by the controller either; they show up only as gaps in the sequence numbers.
 
-The UI does not show assignment generations or who completed a task. Follow the controller log for that:
+The controller keeps its last 500 events, heartbeats included, and serves them at <http://localhost:8080/api/events>. It prints the same lines to its log:
 
 ```bash
 docker compose logs -f controller
 ```
 
+The vehicles log what they receive and which faults they apply to their own heartbeats:
+
+```bash
+docker compose logs -f vehicle-1
+```
+
 ### Included scenarios
 
-| Scenario | Faults | What it exposes |
-|---|---|---|
-| [`zombie-steals-completion`](scenarios/zombie-steals-completion.json) | One vehicle's heartbeats are lost for 6 s | A revived vehicle finishes a task that was reassigned, and the replacement is never released |
-| [`task-hot-potato`](scenarios/task-hot-potato.json) | Two vehicles go silent one after the other | A task changes hands three times and two vehicles drive to the same cell |
-| [`stale-assignment-after-takeover`](scenarios/stale-assignment-after-takeover.json) | A delayed assignment, a late vehicle, a lost heartbeat | An obsolete assignment is executed because the retry went to a different vehicle |
-| [`unresponsive-vehicles`](scenarios/unresponsive-vehicles.json) | One vehicle cannot be heard, one cannot hear | A retry storm that one healthy vehicle has to absorb |
-| [`heartbeat-loss-staircase`](scenarios/heartbeat-loss-staircase.json) | 2, 3, and 6 lost heartbeats on three vehicles | Where the failure detector trips, and what a short flap costs |
+| Scenario | Faults | What it exposes | Today |
+|---|---|---|---|
+| [`zombie-steals-completion`](scenarios/zombie-steals-completion.json) | One vehicle's heartbeats are lost for 6 s | A revived vehicle must not finish a task that was reassigned, and the replacement must be released | Fixed |
+| [`task-hot-potato`](scenarios/task-hot-potato.json) | Two vehicles go silent one after the other | A task changes hands three times and two vehicles drive to the same cell | Fixed, but the task still changes hands |
+| [`stale-assignment-after-takeover`](scenarios/stale-assignment-after-takeover.json) | A delayed assignment, a late vehicle, a lost heartbeat | An obsolete assignment must not be executed because the retry went to a different vehicle | Contained: the vehicle still takes one step |
+| [`unresponsive-vehicles`](scenarios/unresponsive-vehicles.json) | One vehicle cannot be heard, one cannot hear | A retry storm that one healthy vehicle has to absorb | Open |
+| [`heartbeat-loss-staircase`](scenarios/heartbeat-loss-staircase.json) | 2, 3, and 6 lost heartbeats on three vehicles | Where the failure detector trips, and what a short flap costs | Works, with some churn |
 
-For each scenario, **Expected** is the behaviour a correct controller should show, and **Observed today** is what the current implementation does. The observed behaviour is the failure each scenario is built to expose, so those notes will change as fixes land. Times are approximate and measured from startup.
+For each scenario, **Expected** is the behaviour a correct controller should show, and **Observed today** is what the current implementation does. Most scenarios were built to expose a failure, and the controller has since been fixed in three ways: it credits a completion only to the vehicle the task is assigned to, it requeues a task of a silent vehicle only while that task still belongs to it, and it stops a vehicle that moves without an assignment. The notes below record the behaviour after those fixes and will change again as more land. Times are approximate and measured from the start signal. Repeated runs agree to within a fraction of a second, except where a scenario says otherwise.
 
 #### `zombie-steals-completion`
 
@@ -152,9 +162,9 @@ For each scenario, **Expected** is the behaviour a correct controller should sho
 
 **Expected.** vehicle-1 is declared offline and task-1 goes to vehicle-3. When vehicle-1's heartbeats return, the controller reconciles: one vehicle keeps task-1, the other is stopped, and the task completes exactly once.
 
-**Observed today.** The revived vehicle-1 walks to (10, 2) and the controller marks task-1 completed, credited to vehicle-3. Nothing stops vehicle-3, which drives to (10, 2) and stays `WORKING` on a completed task forever, so the fleet is permanently one vehicle short. The controller looks the task up through `vehicle.CurrentTask`, which is not cleared when a vehicle goes offline, and never checks `task.AssignedVehicle`.
+**Observed today.** As expected. vehicle-1 is marked offline at about 4.4 s and task-1 goes to vehicle-3 at about 4.9 s. When vehicle-1's heartbeats return at about 8 s, it has moved on, but the controller no longer lists task-1 under it, so it sends a stop and vehicle-1 stays at (10, -2). vehicle-3 completes task-1 at (10, 2) at about 26 s, exactly once, and every vehicle ends `IDLE`. The controller always keeps the new owner. vehicle-1 was 4 cells from (10, 2) when it was stopped, and would have arrived at about 12 s.
 
-**On the website.** After about 5 s vehicle-1 turns red and its position freezes, and task-1 switches to `→ vehicle-3`. vehicle-1 then returns to `IDLE` but keeps moving toward (10, 2), so two lines run to the same ✕. Around 14 s task-1 turns `COMPLETED` while still listed under vehicle-3. vehicle-3 keeps driving, parks at (10, 2) at about 29 s, and stays `WORKING` on `task-1`.
+**On the website.** At about 4.4 s vehicle-1 turns grey with a red ✕, and its counter and position freeze at 2 and (10, -9). The log shows `Marking vehicle-1 offline` and `Assigning task-1 to vehicle-3 (generation 2)`, and task-1 switches to `→ vehicle-3`. At about 8 s the ✕ clears, the counter jumps from 2 to 9, vehicle-1 appears at (10, -2), and the log shows `Stopping vehicle-1 (sequence 2)` with the reason. vehicle-1 stays there, `IDLE`, while vehicle-3 keeps driving. task-2 completes at about 10 s. At about 26 s task-1 completes under vehicle-3, which returns to `IDLE`.
 
 #### `task-hot-potato`
 
@@ -162,19 +172,21 @@ For each scenario, **Expected** is the behaviour a correct controller should sho
 
 **Expected.** Only one vehicle owns the task at any time. When a previous owner reappears it is told to stop. vehicle-3 is never needed.
 
-**Observed today.** The task goes to vehicle-1, then vehicle-2. When vehicle-2 goes dark, the nearest idle vehicle is the revived vehicle-1, so the task goes back to it. The revived vehicle-2 is reported `IDLE` but keeps driving to the same destination and arrives about 10 s after vehicle-1 has completed the task.
+**Observed today.** The controller has one owner at any time, and every revived owner is stopped. The task goes to vehicle-1, then to vehicle-2 when vehicle-1 is marked offline at about 4.4 s. vehicle-1 returns at about 8 s and is stopped at (18, -10). When vehicle-2 is marked offline at about 10.4 s, the nearest idle vehicle is the stopped vehicle-1, so the task goes back to it (generation 3). vehicle-2 returns at about 14 s and is stopped at (30, 10). vehicle-1 resumes from (18, -10) and completes the task at about 34 s. vehicle-3 is never needed. Still, the task changes hands twice, and each time the silent previous owner keeps driving for about 4 s, so two vehicles head for (40, -8) until it is stopped.
 
-**On the website.** The assignment in the Tasks table changes from `→ vehicle-1` to `→ vehicle-2` and back to `→ vehicle-1`. Each owner turns red with a frozen position while it is silent. A vehicle that comes back reads `IDLE` but still lists `task-1`, and its circle keeps heading for (40, -8), so two lines run to the same ✕. vehicle-3 never moves. vehicle-1 finishes at about 35 s, and vehicle-2 arrives at about 45 s with nothing in the tables changing except its position.
+**On the website.** The assignment in the Tasks table changes from `→ vehicle-1` to `→ vehicle-2` and back to `→ vehicle-1`. Each owner turns grey with a red ✕ and a frozen position and counter while it is silent. When a vehicle comes back, the ✕ clears, its counter jumps by about 7, its circle appears several cells further along, and the log shows `Stopping vehicle-N` with the reason. It stays `IDLE` where it was stopped. vehicle-3 never moves. The task completes at about 34 s under vehicle-1.
 
 #### `stale-assignment-after-takeover`
 
-**Setup.** One task at (-6, -10), 6 cells from vehicle-3 and 16 from vehicle-1. vehicle-3's first heartbeat is dropped, so it registers a second late and vehicle-1 gets the first assignment. The controller delays that assignment by 5 s, and vehicle-1's heartbeat 2 is dropped.
+**Setup.** One task at (-6, -10), 6 cells from vehicle-3 and 16 from vehicle-1. vehicle-3's first heartbeat is dropped, so the controller has no position for it until heartbeat 2 arrives at about 1 s, and vehicle-1 usually gets the first assignment. The controller delays that assignment by 5 s, and vehicle-1's heartbeat 2 is dropped.
 
-**Expected.** When the delayed assignment finally arrives, it is recognised as obsolete, because vehicle-3 has already completed the task. vehicle-1 stays where it is.
+**Expected.** When the delayed assignment finally arrives, it is recognised as obsolete, because the controller has already given the task to vehicle-3. vehicle-1 stays where it is.
 
-**Observed today.** After about 2 s the controller concludes that the assignment was lost and re-assigns the task to vehicle-3, which completes it. When the original assignment reaches vehicle-1, it accepts it: its generation check only compares against assignments that vehicle itself has seen, and it never saw the newer one. It walks 16 cells to (-6, -10) while the controller lists it as `IDLE`.
+**Observed today.** After about 2 s the controller concludes that the assignment was lost, because vehicle-1's heartbeat 3 carries no task, and re-assigns the task to vehicle-3, which completes it at about 8 s. At about 5.4 s the original assignment reaches vehicle-1, and it accepts it: its generation check only compares against assignments that vehicle itself has seen, and it never saw generation 2. It takes one step west. Its next heartbeat, at about 6 s, shows it moving without a task, so the controller stops it at (9, -10). The controller contains the stale assignment within one heartbeat, but the vehicle does not reject it.
 
-**On the website.** task-1 is first assigned to vehicle-1, which does not move. After about 2 s the task switches to vehicle-3, which walks 6 cells west and completes the task at about 8 s. All vehicles read `IDLE`, yet from about 6 s vehicle-1's circle slides west the full 16 cells and arrives at about 26 s at the same spot as vehicle-3. It shows no line and no task.
+In one run out of seven the first assignment went to vehicle-3 instead. Until a vehicle's first heartbeat arrives, the controller places it at (0, 0), which is also 16 cells from the task, and the tie is decided by map order. The events then differ (vehicle-3 is assigned, marked offline, stopped, and assigned again), but the outcome is the same: vehicle-3 completes the task, at about 6 s, and vehicle-1 is stopped after one step.
+
+**On the website.** vehicle-3 sits at the origin with counter 0, turns grey with a red ✕ at about 0.4 s, and jumps to (0, -10) with counter 2 at about 1 s. task-1 is first assigned to vehicle-1, which does not move, and the log shows `FAULT: Delaying message for vehicle-1 (sequence 1) by 5s`. After about 2 s the task switches to vehicle-3, which walks 6 cells west and completes the task at about 8 s. At about 6 s vehicle-1's circle moves one cell west, and the log shows `Stopping vehicle-1 (sequence 2)` with the reason. All vehicles end `IDLE`.
 
 #### `unresponsive-vehicles`
 
@@ -182,9 +194,9 @@ For each scenario, **Expected** is the behaviour a correct controller should sho
 
 **Expected.** All four tasks complete. The controller notices that vehicle-2 never acknowledges an assignment and stops sending it work, and it copes with vehicle-1's silence without doing the work twice. The number of retries stays modest.
 
-**Observed today.** All tasks complete after about 50 s, but only after a retry storm: around 55 assignment messages for 4 tasks, with one task's generation reaching about 22. vehicle-2 is the nearest idle vehicle on every cycle, so it keeps winning tasks and silently failing them. vehicle-1 is declared offline after its first heartbeat and works unseen. When its heartbeats resume it can complete a task that another vehicle still holds, which leaves that vehicle stuck `WORKING` (vehicle-2 in one observed run). vehicle-3 does most of the work, one task at a time.
+**Observed today.** All four tasks complete, but only after a retry storm, and the runs differ. Over three runs the controller sent 37 to 55 assignment messages for the 4 tasks, 32 to 50 of them to vehicle-2 and all of those lost. One task's generation reached 22 to 29, and the last task completed between about 40 s and 51 s. The controller never learns that vehicle-2 cannot hear it: vehicle-2's next heartbeat carries no task, so the task is requeued, and vehicle-2 is idle again at the next scheduler tick, usually as the only idle vehicle. vehicle-3 does most of the work, one task at a time. vehicle-1 is marked offline at about 3.4 s and keeps working unseen. Its task is requeued and usually done again by vehicle-3. When vehicle-1's heartbeats resume at about 50 s, the controller stops it, which is harmless by then. A vehicle is no longer left stuck `WORKING`: all three ended `IDLE` in every run.
 
-**On the website.** vehicle-1 turns red within about 5 s and stays frozen at (10, -10) for around 45 s even though it is driving, then jumps to its real position when its heartbeats resume. vehicle-2 never leaves (20, 10). Its row flickers between `WORKING` and `IDLE` every second or two, and tasks in the Tasks table keep flipping between `→ vehicle-2` and `QUEUED`. vehicle-3 visibly does the work and completes the tasks one after another.
+**On the website.** At about 3.4 s vehicle-1 turns grey with a red ✕. Its position and counter stay frozen at (10, -10) and 1 until about 50 s, even though it is driving. Then the ✕ clears, the counter jumps to 51, its circle jumps to its real position, and the log shows `Stopping vehicle-1 (sequence 2)`. vehicle-2 never leaves (20, 10). Its row flickers between `WORKING` and `IDLE` about once a second, and the tasks it is given keep flipping between `→ vehicle-2` and `QUEUED`. The log fills with `FAULT: Dropping message for vehicle-2 (sequence N)` and a new `Assigning ... to vehicle-2 (generation M)` every second. vehicle-3 visibly does the work and completes the tasks one after another.
 
 #### `heartbeat-loss-staircase`
 
@@ -192,9 +204,9 @@ For each scenario, **Expected** is the behaviour a correct controller should sho
 
 **Expected.** Heartbeats are 1 s apart and the timeout is 3 s. Two lost heartbeats leave a gap of about 3 s and are tolerated, while three lost heartbeats trip the detector. A short flap should be cheap: the vehicle comes back and continues its own task.
 
-**Observed today.** vehicle-1 never goes offline. vehicle-2 is offline for under a second, and vehicle-3 for about 3 s. In both cases the task is requeued and given back to the same vehicle. Everything completes at about 26 s. Nothing leaks only because no vehicle is idle during the flaps. With an idle spare, a flap would turn into `zombie-steals-completion`.
+**Observed today.** vehicle-1 never goes offline. vehicle-2 is offline from about 13.4 s for under a second, and vehicle-3 from about 19.4 s for about 3.5 s. In both cases the task is requeued, the revived vehicle is stopped as soon as its heartbeats return, and about 0.3 s later the task is assigned again to the same vehicle, which continues from where it was stopped. All three tasks complete at about 25 s. So a short flap is cheap but not free: it costs a stop, a new generation, and a second assignment. It only ends this tidily because no other vehicle is idle during the flaps. With an idle spare it would play out like `zombie-steals-completion`.
 
-**On the website.** vehicle-1 appears to stall for about 2 s and then jumps about 3 cells, but never turns red. vehicle-2 flashes red for less than a second at about 13 s, and task-2 is briefly `QUEUED`. vehicle-3 turns red for about 3 s at about 20 s, frozen, then jumps about 7 cells, and task-3 goes through `QUEUED` and back. All three tasks are `COMPLETED` at about 26 s.
+**On the website.** vehicle-1 freezes for about 3 s and then jumps 3 cells, its counter going from 5 to 8, but it never turns grey. vehicle-2 turns grey with a red ✕ for less than a second at about 13 s, and task-2 is briefly `QUEUED`. Its counter goes from 11 to 15 and it jumps 4 cells. vehicle-3 shows the ✕ for about 3.5 s at about 19 s, frozen, then jumps 7 cells, its counter going from 17 to 24. Each time the log shows `Marking vehicle-N offline`, `Stopping vehicle-N`, and `Assigning task-N to vehicle-N (generation 2)`. All three tasks are `COMPLETED` at about 25 s.
 
 ## Run without Docker
 
@@ -205,7 +217,7 @@ For each scenario, **Expected** is the behaviour a correct controller should sho
 - [Docker](https://docs.docker.com/get-docker/) with Compose, to serve the web UI
 - A modern browser for the UI
 
-The commands below assume the broker is reachable at `localhost:1883`, which is the common local Mosquitto address. If your broker uses another address, configure the application accordingly.
+The commands below assume the broker is reachable at `localhost:1883`, which is the common local Mosquitto address. The programs default to `tcp://localhost:9090`, so the commands pass `-broker` explicitly. If your broker uses another address, change it there.
 
 Run these commands from the repository root.
 
@@ -229,16 +241,24 @@ go build ./...
 To run the programs directly without producing binaries:
 
 ```bash
-go run ./cmd/controller
+go run ./cmd/controller -broker tcp://localhost:1883 -scenario scenarios/no_faults.json
 ```
 
-In a separate terminal, start a vehicle:
+In separate terminals, start one process per vehicle that the scenario lists. The bundled scenarios list `vehicle-1`, `vehicle-2` and `vehicle-3`:
 
 ```bash
-go run ./cmd/vehicle
+go run ./cmd/vehicle -id vehicle-1 -broker tcp://localhost:1883 -scenario scenarios/no_faults.json
 ```
 
-Start additional vehicle processes in separate terminals if the application configuration permits multiple instances. If a command requires arguments or environment variables in your checkout, use the options defined by that command's entry point.
+```bash
+go run ./cmd/vehicle -id vehicle-2 -broker tcp://localhost:1883 -scenario scenarios/no_faults.json
+```
+
+```bash
+go run ./cmd/vehicle -id vehicle-3 -broker tcp://localhost:1883 -scenario scenarios/no_faults.json
+```
+
+Nothing moves until every vehicle in the scenario has registered, because the controller only sends the start signal then. A vehicle that is still missing shows as `NOT_READY` in the UI. Pass the same `-scenario` to the controller and to every vehicle, and restart the broker between runs so that the retained `start` message of the previous run is gone.
 
 ### 3. Open the web UI
 
@@ -248,7 +268,7 @@ The UI is served by the `web` service in [`docker-compose.yml`](docker-compose.y
 docker compose up -d web
 ```
 
-Then open <http://localhost:8000> in your browser. The UI polls the controller at `http://localhost:8080/api/state`, so the controller must be running and reachable on port 8080. Stop the UI with `docker compose stop web`.
+Then open <http://localhost:8000> in your browser. The UI polls the controller at `http://localhost:8080/api/state` and `http://localhost:8080/api/events`, so the controller must be running and reachable on port 8080. Stop the UI with `docker compose stop web`.
 
 ## Configuration and message flow
 
@@ -256,9 +276,12 @@ Messages are JSON payloads carried over MQTT topics. The documented topic patter
 
 | Direction | Topic | Purpose |
 |---|---|---|
-| Vehicle → controller | `heartbeat/{vehicle_id}` | Heartbeat, position, and sequence number |
+| Vehicle → controller | `heartbeat/{vehicle_id}` | Registration (sequence 0), then heartbeats with position, current task, and sequence number |
 | Controller → vehicle | `task/{vehicle_id}` | Task assignment and assignment generation |
-| Controller → vehicle | `stop/{vehicle_id}` | Stop an obsolete assignment |
+| Controller → vehicle | `stop/{vehicle_id}` | Stop a vehicle that is executing an obsolete assignment |
+| Controller → all vehicles | `start` | Retained signal, sent once every vehicle in the scenario has registered |
+
+The controller also serves two read-only HTTP endpoints on port 8080: `GET /api/state` returns the vehicles and tasks as the controller sees them, and `GET /api/events` returns its event log, which the UI shows next to the grid.
 
 See the source under [`src/`](src/) for the current implementation and configuration details.
 
@@ -269,7 +292,8 @@ cmd/
   controller/   Controller entry point
   vehicle/      Vehicle entry point
 src/
-  controller/   Fleet state, scheduling, HTTP interface
+  config/       Scenario file loading
+  controller/   Fleet state, scheduling, event log, HTTP interface
   domain/       Shared domain types
   fault/        Message fault injection
   mqtt/         MQTT client integration
@@ -277,7 +301,7 @@ src/
 scenarios/
   *.json        Scenario files: start positions, tasks, fault rules
 web/
-  index.html    Browser UI
+  index.html    Browser UI: fleet grid, vehicle and task tables, event log
 ```
 
 ## Scope
