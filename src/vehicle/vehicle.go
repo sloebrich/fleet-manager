@@ -106,6 +106,7 @@ func (v *Vehicle) publish(topic domain.Topic, sequence int, payload []byte) erro
 }
 
 func (v *Vehicle) heartbeat() error {
+	v.mu.Lock()
 	v.Sequence++
 
 	message := domain.HeartbeatMessage{
@@ -114,6 +115,7 @@ func (v *Vehicle) heartbeat() error {
 		Sequence:    v.Sequence,
 		CurrentTask: v.currentTask,
 	}
+	v.mu.Unlock()
 
 	payload, err := json.Marshal(message)
 	if err != nil {
@@ -147,6 +149,9 @@ func (v *Vehicle) move() {
 }
 
 func (v *Vehicle) HandleTask(client paho.Client, message paho.Message) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	var task domain.AssignTaskMessage
 
 	if err := json.Unmarshal(message.Payload(), &task); err != nil {

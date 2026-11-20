@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"fleet-manager/src/config"
@@ -93,9 +94,13 @@ func main() {
 
 	log.Print("waiting for start signal")
 	controllerStarted := make(chan struct{})
+	var once sync.Once
+
 	err = client.Subscribe(string(domain.TopicStart), func(client paho.Client, message paho.Message) {
 		log.Print("received start from controller, starting vehicle")
-		controllerStarted <- struct{}{}
+		once.Do(func() {
+			close(controllerStarted)
+		})
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -104,6 +109,10 @@ func main() {
 	log.Print("Sending first heartbeat")
 	msg := domain.HeartbeatMessage{VehicleID: *vehicleId, Sequence: 0}
 	payload, err := json.Marshal(&msg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	err = client.Publish(fmt.Sprintf("%s/%s", domain.TopicHeartbeat, *vehicleId), payload)
 	if err != nil {
 		log.Fatal(err)

@@ -36,9 +36,10 @@ type Task struct {
 type VehicleStatus string
 
 const (
-	VehicleIdle    VehicleStatus = "IDLE"
-	VehicleWorking VehicleStatus = "WORKING"
-	VehicleOffline VehicleStatus = "OFFLINE"
+	VehicleIdle     VehicleStatus = "IDLE"
+	VehicleWorking  VehicleStatus = "WORKING"
+	VehicleOffline  VehicleStatus = "OFFLINE"
+	VehicleNotReady VehicleStatus = "NOT_READY"
 )
 
 type VehicleState struct {

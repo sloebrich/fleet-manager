@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"fleet-manager/src/config"
 	"fleet-manager/src/domain"
 	"fleet-manager/src/fault"
 	mqtt "fleet-manager/src/mqtt"
@@ -28,8 +29,7 @@ type Controller struct {
 
 	faultInjector *fault.Injector
 
-	events        *eventLog
-	VehiclesReady map[string]bool
+	events *eventLog
 }
 
 func New(client *mqtt.Client) *Controller {
@@ -40,7 +40,6 @@ func New(client *mqtt.Client) *Controller {
 		nextSequence:  make(map[string]int),
 		faultInjector: fault.New(),
 		events:        newEventLog(500),
-		VehiclesReady: make(map[string]bool),
 	}
 
 	go controller.failureDetector()
@@ -67,6 +66,18 @@ func (c *Controller) AddFault(action fault.Action, vehicleID string, sequence in
 	})
 }
 
+func (c *Controller) AddVehicles(vehicles []config.VehicleConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, v := range vehicles {
+		c.vehicles[v.ID] = &domain.VehicleState{
+			ID:     v.ID,
+			Status: domain.VehicleNotReady,
+		}
+	}
+}
+
 func (c *Controller) nextMessageSequence(vehicleID string) int {
 	c.nextSequence[vehicleID]++
 
@@ -85,25 +96,35 @@ func (c *Controller) HandleHeartbeat(
 
 	c.log(domain.EventTypeHeartbeat, fmt.Sprintf("received heartbeat from vehicle %s, sequence=%d", heartbeat.VehicleID, heartbeat.Sequence))
 
-	if heartbeat.Sequence == 0 {
-		c.mu.Lock()
-		c.VehiclesReady[heartbeat.VehicleID] = true
-		defer c.mu.Unlock()
-
-		for _, ready := range c.VehiclesReady {
-			if !ready {
-				return
-			}
-		}
-
-		log.Print("All vehicles started")
-		payload, err := json.Marshal(struct{}{})
-		err = c.client.Publish(string(domain.TopicStart), payload, true)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
+	if heartbeat.Sequence > 0 {
 		c.heartbeat(heartbeat)
+		return
+	}
+
+	c.mu.Lock()
+
+	vehicle, exists := c.vehicles[heartbeat.VehicleID]
+	if !exists {
+		c.log(domain.EventTypeError, fmt.Sprintf("heartbeat from unknown vehicle %s", heartbeat.VehicleID))
+		c.mu.Unlock()
+		return
+	}
+
+	vehicle.Status = domain.VehicleIdle
+
+	for _, vehicle := range c.vehicles {
+		if vehicle.Status == domain.VehicleNotReady {
+			c.mu.Unlock()
+			return
+		}
+	}
+
+	c.mu.Unlock()
+	c.log(domain.EventTypeMessage, "All vehicles started")
+
+	err := c.client.Publish(string(domain.TopicStart), []byte("{}"), true)
+	if err != nil {
+		c.log(domain.EventTypeError, fmt.Sprintf("could not send start message: %v", err))
 	}
 }
 
@@ -115,12 +136,8 @@ func (c *Controller) heartbeat(
 	vehicle, exists := c.vehicles[req.VehicleID]
 
 	if !exists {
-		vehicle = &domain.VehicleState{
-			ID:     req.VehicleID,
-			Status: domain.VehicleIdle,
-		}
-
-		c.vehicles[req.VehicleID] = vehicle
+		c.log(domain.EventTypeError, fmt.Sprintf("could not find vehicle %s", req.VehicleID))
+		return
 	}
 
 	if vehicle.Status == domain.VehicleOffline {
@@ -165,9 +182,10 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 	}
 	if delay := c.faultInjector.ShouldDelay(sequence, vehicleID); delay != nil {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: Delaying message for vehicle=%s with sequence=%d ",
+			"FAULT: Delaying message for vehicle=%s with sequence=%d by %dms",
 			vehicleID,
 			sequence,
+			*delay,
 		))
 		go func() {
 			time.Sleep(*delay)
@@ -213,7 +231,7 @@ func (c *Controller) checkVehicles() {
 	now := time.Now()
 
 	for _, vehicle := range c.vehicles {
-		if vehicle.Status == domain.VehicleOffline {
+		if vehicle.Status == domain.VehicleOffline || vehicle.Status == domain.VehicleNotReady {
 			continue
 		}
 

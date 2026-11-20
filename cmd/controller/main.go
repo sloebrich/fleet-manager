@@ -38,19 +38,12 @@ func main() {
 		}
 	}()
 
-	err = client.Subscribe(fmt.Sprintf("%s/+", domain.TopicHeartbeat), controller.HandleHeartbeat)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Println("Controller running")
-
 	scenario, err := config.LoadScenario(*scenarioPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("loaded %d tasks and %d controller faults", len(scenario.Tasks), len(scenario.ControllerFaults))
+	controller.AddVehicles(scenario.Vehicles)
 
 	for _, task := range scenario.Tasks {
 		controller.CreateTask(task.ID, task.Destination)
@@ -83,9 +76,14 @@ func main() {
 		)
 	}
 
-	for _, v := range scenario.Vehicles {
-		controller.VehiclesReady[v.ID] = false
+	log.Printf("loaded %d vehicles, %d tasks,  and %d controller faults", len(scenario.Vehicles), len(scenario.Tasks), len(scenario.ControllerFaults))
+
+	err = client.Subscribe(fmt.Sprintf("%s/+", domain.TopicHeartbeat), controller.HandleHeartbeat)
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	log.Println("Controller running")
 
 	select {}
 }
