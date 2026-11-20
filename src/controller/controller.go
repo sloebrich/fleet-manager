@@ -90,11 +90,11 @@ func (c *Controller) HandleHeartbeat(
 	var heartbeat domain.HeartbeatMessage
 
 	if err := json.Unmarshal(message.Payload(), &heartbeat); err != nil {
-		c.log(domain.EventTypeError, fmt.Sprintf("invalid heartbeat: %v", err))
+		c.log(domain.EventTypeError, fmt.Sprintf("Invalid heartbeat: %v", err))
 		return
 	}
 
-	c.log(domain.EventTypeHeartbeat, fmt.Sprintf("received heartbeat from vehicle %s, sequence=%d", heartbeat.VehicleID, heartbeat.Sequence))
+	c.log(domain.EventTypeHeartbeat, fmt.Sprintf("Received heartbeat from %s (sequence %d)", heartbeat.VehicleID, heartbeat.Sequence))
 
 	if heartbeat.Sequence > 0 {
 		c.heartbeat(heartbeat)
@@ -105,7 +105,7 @@ func (c *Controller) HandleHeartbeat(
 
 	vehicle, exists := c.vehicles[heartbeat.VehicleID]
 	if !exists {
-		c.log(domain.EventTypeError, fmt.Sprintf("heartbeat from unknown vehicle %s", heartbeat.VehicleID))
+		c.log(domain.EventTypeError, fmt.Sprintf("Heartbeat from unknown %s", heartbeat.VehicleID))
 		c.mu.Unlock()
 		return
 	}
@@ -124,7 +124,7 @@ func (c *Controller) HandleHeartbeat(
 
 	err := c.client.Publish(string(domain.TopicStart), []byte("{}"), true)
 	if err != nil {
-		c.log(domain.EventTypeError, fmt.Sprintf("could not send start message: %v", err))
+		c.log(domain.EventTypeError, fmt.Sprintf("Could not send start message: %v", err))
 	}
 }
 
@@ -136,7 +136,7 @@ func (c *Controller) heartbeat(
 	vehicle, exists := c.vehicles[req.VehicleID]
 
 	if !exists {
-		c.log(domain.EventTypeError, fmt.Sprintf("could not find vehicle %s", req.VehicleID))
+		c.log(domain.EventTypeError, fmt.Sprintf("Could not find %s", req.VehicleID))
 		return
 	}
 
@@ -173,7 +173,7 @@ func (c *Controller) heartbeat(
 			task.Status = domain.TaskCompleted
 			vehicle.Status = domain.VehicleIdle
 			vehicle.CurrentTask = ""
-			c.log(domain.EventTypeMessage, fmt.Sprintf("task %s completed by %s", task.ID, vehicle.ID))
+			c.log(domain.EventTypeMessage, fmt.Sprintf("Completed %s by %s", task.ID, vehicle.ID))
 		}
 	}
 
@@ -183,7 +183,7 @@ func (c *Controller) heartbeat(
 func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string, payload []byte) error {
 	if c.faultInjector.ShouldDrop(sequence, vehicleID) {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: Dropping message for vehicle=%s with sequence=%d ",
+			"FAULT: Dropping message for %s (sequence %d)",
 			vehicleID,
 			sequence,
 		))
@@ -191,7 +191,7 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 	}
 	if delay := c.faultInjector.ShouldDelay(sequence, vehicleID); delay != nil {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: Delaying message for vehicle=%s with sequence=%d by %dms",
+			"FAULT: Delaying message for %s (sequence %d) by %v",
 			vehicleID,
 			sequence,
 			*delay,
@@ -200,26 +200,26 @@ func (c *Controller) publish(topic domain.Topic, sequence int, vehicleID string,
 			time.Sleep(*delay)
 			err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
 			if err != nil {
-				c.log(domain.EventTypeError, fmt.Sprintf("publish failed: %v", err))
+				c.log(domain.EventTypeError, fmt.Sprintf("Publish failed: %v", err))
 			}
 		}()
 		return nil
 	}
 	if c.faultInjector.ShouldDuplicate(sequence, vehicleID) {
 		c.log(domain.EventTypeMessage, fmt.Sprintf(
-			"FAULT: DUPLICATING message for vehicle=%s with sequence=%d ",
+			"FAULT: Duplicating message for %s (sequence %d)",
 			vehicleID,
 			sequence,
 		))
 		err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
 		if err != nil {
-			c.log(domain.EventTypeError, fmt.Sprintf("publish failed: %v", err))
+			c.log(domain.EventTypeError, fmt.Sprintf("Publish failed: %v", err))
 		}
 
 	}
 	err := c.client.Publish(fmt.Sprintf("%s/%s", topic, vehicleID), payload)
 	if err != nil {
-		c.log(domain.EventTypeError, fmt.Sprintf("publish failed: %v", err))
+		c.log(domain.EventTypeError, fmt.Sprintf("Publish failed: %v", err))
 	}
 	return err
 }
@@ -254,7 +254,7 @@ func (c *Controller) checkVehicles() {
 			}
 
 			c.log(domain.EventTypeMessage, fmt.Sprintf(
-				"vehicle offline: %s",
+				"Marking %s offline",
 				vehicle.ID,
 			))
 		}
@@ -334,7 +334,7 @@ func (c *Controller) assignTask(task *domain.Task, vehicle *domain.VehicleState)
 
 	err = c.publish(domain.TopicTask, sequence, vehicle.ID, payload)
 
-	c.log(domain.EventTypeMessage, fmt.Sprintf("assigned task=%s to vehicle=%s generation=%d", task.ID, vehicle.ID, task.AssignmentGeneration))
+	c.log(domain.EventTypeMessage, fmt.Sprintf("Assigning %s to %s (generation %d)", task.ID, vehicle.ID, task.AssignmentGeneration))
 	return err
 }
 
@@ -352,7 +352,7 @@ func (c *Controller) stopVehicle(vehicleId string, reason string) error {
 	}
 
 	err = c.publish(domain.TopicStop, sequence, vehicleId, payload)
-	c.log(domain.EventTypeMessage, fmt.Sprintf("stopped vehicle=%s reason=%s sequence=%d", vehicleId, reason, sequence))
+	c.log(domain.EventTypeMessage, fmt.Sprintf("Stopping %s (sequence %d): %s", vehicleId, sequence, reason))
 
 	return err
 }
