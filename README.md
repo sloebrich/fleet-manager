@@ -9,17 +9,19 @@ Vehicles and the controller communicate through an MQTT broker. A browser UI vis
 - Independent Go controller and vehicle processes
 - MQTT publish/subscribe messaging with JSON payloads
 - Vehicle movement and periodic heartbeat/position updates
+- Synchronised startup: vehicles register first and wait for a start signal from the controller
 - Task assignment and reassignment
 - Heartbeat-based failure detection
+- Reconciliation of vehicles that report a task they no longer own: the controller stops them
 - Message fault injection: drop, delay, duplicate, and reorder
 - Controller state persistence and recovery
-- Browser-based fleet visualization
+- Browser-based fleet visualization with a live controller event log
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    UI["Browser UI<br/>web/"] -->|"HTTP"| CTRL["Controller<br/>authoritative state, scheduler,<br/>failure detection, persistence"]
+    UI["Browser UI<br/>web/"] -->|"HTTP: /api/state, /api/events"| CTRL["Controller<br/>authoritative state, scheduler,<br/>failure detection, persistence"]
     CTRL <-->|"subscribe / publish"| MQTT[("MQTT broker")]
     V1["Vehicle process 1<br/>movement + heartbeat"] <-->|"subscribe / publish"| MQTT
     V2["Vehicle process 2<br/>movement + heartbeat"] <-->|"subscribe / publish"| MQTT
@@ -29,10 +31,11 @@ The broker transports messages; it does not own fleet state. The controller is t
 
 Typical message flow:
 
-- Vehicles publish heartbeat messages, including their current position and sequence number.
-- The controller consumes heartbeats, updates its state, and detects task completion or vehicle timeouts.
+- At startup, every vehicle publishes a registration heartbeat (sequence 0) and waits. The controller knows the vehicles from the scenario file and starts them all together: once every listed vehicle has registered, it publishes a retained `start` message.
+- After the start signal, vehicles publish a heartbeat every second, including their current position, the task they are executing, and a sequence number.
+- The controller consumes heartbeats, updates its state, and detects task completion or vehicle timeouts. A vehicle that reports a task the controller has given to someone else is told to stop.
 - The controller publishes task assignments and stop commands on vehicle-specific topics.
-- The UI presents the current simulation state.
+- The UI polls the controller's HTTP API for the current simulation state and for the controller's event log.
 
 ## Quick start (Docker)
 
@@ -42,7 +45,7 @@ The only requirements are [Docker](https://docs.docker.com/get-docker/) with Com
 docker compose up --build
 ```
 
-This builds the Go programs and starts the MQTT broker, the controller, three vehicles, and the web UI. Then open <http://localhost:8000>. The controller's HTTP API is published on <http://localhost:8080>.
+This builds the Go programs and starts the MQTT broker, the controller, three vehicles, and the web UI. The vehicles stay put until all three have registered with the controller, which takes a moment. Then open <http://localhost:8000>. The controller's HTTP API is published on <http://localhost:8080> (`/api/state` and `/api/events`), and the broker on port 1883.
 
 Stop everything with `Ctrl+C`, and remove the containers with `docker compose down`.
 
@@ -69,7 +72,7 @@ To pin a scenario, put `SCENARIO=scenarios/<file>.json` in a `.env` file next to
 
 Without Docker, pass `-scenario scenarios/<file>.json` to the controller and to every vehicle.
 
-Compose starts the controller and the vehicles at the same time. A heartbeat that a vehicle sends before the controller has subscribed is lost, which shifts that vehicle's registration by about a second and can change how a scenario plays out. If a run does not match its description, run `docker compose down` and start it again.
+Startup order does not matter. The controller registers the vehicles listed in the scenario as `NOT_READY`, and each vehicle announces itself with a heartbeat that has sequence 0 and then waits. When every listed vehicle has announced itself, the controller publishes a retained `start` message and all vehicles begin moving at the same moment. The broker retains that message, so a vehicle that is restarted later starts immediately. Faults only apply from the first real heartbeat (sequence 1) on; the registration heartbeat is never dropped or delayed. This is what makes a scenario play out the same way on every run, and all times below are measured from the start signal.
 
 ### Scenario file format
 
@@ -92,7 +95,7 @@ Compose starts the controller and the vehicles at the same time. A heartbeat tha
 
 | Field | Meaning |
 |---|---|
-| `vehicles` | Start position per vehicle ID. A vehicle that is not listed starts at the `-startX`/`-startY` flags (default `0,0`). |
+| `vehicles` | The vehicles of the scenario, each with a start position. The controller only accepts vehicles listed here and waits for all of them before it starts the fleet, so list every vehicle that runs: Compose runs `vehicle-1`, `vehicle-2` and `vehicle-3`. A vehicle process that is not listed starts at its `-startX`/`-startY` flags (default `0,0`), but the controller ignores its heartbeats. |
 | `tasks` | Tasks created when the controller starts, each with a destination on the grid. |
 | `controller_faults` | Faults on messages the controller sends to vehicles: task assignments and stop commands. `sequence` counts those messages per vehicle, starting at 1. |
 | `vehicle_faults` | Faults on heartbeats a vehicle sends. `sequence` is the heartbeat number, starting at 1. |
@@ -107,9 +110,10 @@ If several rules match one message, `drop` wins over `delay`, and `delay` wins o
 
 Timing to keep in mind when reading a scenario:
 
-- A vehicle moves one cell per second, first along x, then along y, and sends a heartbeat every second. Heartbeat *N* leaves about *N* − 1 seconds after the vehicle starts.
-- The controller marks a vehicle `OFFLINE` after more than 3 seconds without a heartbeat and puts its task back in the queue.
+- A vehicle moves one cell per second, first along x, then along y, and sends a heartbeat every second. Heartbeat *N* leaves about *N* − 1 seconds after the start signal.
+- The controller marks a vehicle `OFFLINE` after more than 3 seconds without a heartbeat and puts its task back in the queue, provided that task is still assigned to that vehicle.
 - The controller assigns queued tasks to the nearest idle vehicle every 0.5 seconds.
+- A vehicle that sends a heartbeat while the controller has no task assigned to it, and that has moved since its previous heartbeat, is told to stop. The same happens when a vehicle reports a different task than the one the controller has given it.
 
 ### Reading the web UI
 
@@ -118,6 +122,11 @@ The UI shows the controller's view, not the vehicles' real state.
 - The **Vehicles** table lists each vehicle's last reported position, its status (`IDLE`, `WORKING`, or a red `OFFLINE`), and the task the controller thinks it has.
 - The **Tasks** table lists each task's status (`QUEUED`, `IN_PROGRESS`, `COMPLETED`) and the vehicle it is assigned to.
 - On the grid, every vehicle is a coloured circle. While the controller thinks a vehicle is working on an in-progress task, a line leads from the vehicle to the task's ✕.
+- Every task that is not completed has a ✕ at its goal, labelled with the task id. It is grey while the task is `QUEUED` and takes the assigned vehicle's colour while the task is `IN_PROGRESS`. A completed task's ✕ disappears.
+- The number inside a vehicle is the last heartbeat sequence the controller accepted. A jump, such as 5 to 8, means heartbeats were lost on the way.
+- A ring pulses out from a vehicle each time the controller receives a heartbeat from it. A duplicated or late heartbeat also pulses, but does not change the number.
+- A grey circle with a red ✕ means the controller has marked the vehicle `OFFLINE`. It clears with the next heartbeat.
+- The event log does not list heartbeats, because the grid already shows them.
 
 The UI does not show assignment generations or who completed a task. Follow the controller log for that:
 
